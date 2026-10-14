@@ -1,5 +1,6 @@
 package com.adda.chat.ui
 
+import androidx.compose.material.icons.filled.People
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 
@@ -255,7 +256,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             if (me.friends.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.People, contentDescription = null, tint = Accent, modifier = Modifier.size(38.dp)) }
+                        Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(Icons.Filled.People, contentDescription = null, tint = Accent, modifier = Modifier.size(38.dp)) }
                         Spacer(Modifier.height(12.dp))
                         Text("এখনো কোনো চ্যাট নেই", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
                     }

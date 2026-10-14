@@ -198,7 +198,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Lock, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp)) }
+                    Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(Icons.Filled.Lock, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp)) }
                     Spacer(Modifier.size(12.dp))
                     Text("কথা বলা শুরু করুন", fontWeight = FontWeight.Bold, color = Ink)
                 }
