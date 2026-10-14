@@ -116,7 +116,7 @@ fun AppRoot() {
             Session.me == null && Session.hasToken -> LoadingScreen()
             Session.me == null -> AuthScreen()
             Session.activeFriend != null -> ChatScreen(requestCallPermission)
-            else -> HomeScreen()
+            else -> MainShell()
         }
         if (CallManager.phase != CallManager.Phase.None) {
             CallScreen(requestCallPermission)

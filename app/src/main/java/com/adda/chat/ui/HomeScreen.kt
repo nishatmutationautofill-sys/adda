@@ -11,6 +11,12 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,7 +79,7 @@ import androidx.compose.ui.unit.sp
 import com.adda.chat.data.Session
 
 @Composable
-fun HomeScreen() {
+fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
     val me = Session.me ?: return
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -87,7 +93,7 @@ fun HomeScreen() {
         if (granted) {
             scannerLauncher.launch(
                 ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setPrompt("অন্য ব্যক্তির আড্ডা QR কোড স্ক্যান করুন")
+                    .setPrompt("")
                     .setBeepEnabled(false).setOrientationLocked(true)
             )
         } else Session.toast("QR স্ক্যান করতে ক্যামেরার অনুমতি দিন")
@@ -96,7 +102,7 @@ fun HomeScreen() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == AndroidPackageManager.PERMISSION_GRANTED) {
             scannerLauncher.launch(
                 ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setPrompt("অন্য ব্যক্তির আড্ডা QR কোড স্ক্যান করুন")
+                    .setPrompt("")
                     .setBeepEnabled(false).setOrientationLocked(true)
             )
         } else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -110,6 +116,8 @@ fun HomeScreen() {
             photoPicker.launch("image/*")
         }
     }
+    LaunchedEffect(tab) { if (tab == 1) Session.refreshDiscoverableUsers() }
+    var showAddField by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var friendUid by remember { mutableStateOf("") }
     var friendSearch by remember { mutableStateOf("") }
@@ -162,97 +170,93 @@ fun HomeScreen() {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // প্রোফাইল কার্ড
+            when (tab) {
+                0 -> {
             item {
                 Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(64.dp).clickable { photoPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
-                            Avatar(me.username, 58.dp, photoUrl = me.profilePhoto)
-                            Box(Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) { Text("+", color = Color.White, fontWeight = FontWeight.Bold) }
-                        }
-                        Spacer(Modifier.size(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(me.username, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
-                            Text("আইডি: ${me.uid}", color = Muted, fontSize = 13.sp)
-                        }
-                        IconButton(onClick = {
-                            clipboard.setText(AnnotatedString(me.uid))
-                            Session.toast("আপনার আইডি কপি হয়েছে")
-                        }) { Icon(Icons.Filled.ContentCopy, contentDescription = "আইডি কপি", tint = Accent) }
-                    }
-                }
-            }
-
-            // QR দিয়ে সরাসরি বন্ধু যোগ
-            item {
-                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("QR কোড দিয়ে বন্ধু যোগ", fontWeight = FontWeight.SemiBold, color = Ink)
-                        Text("নিজের QR দেখান অথবা অন্যজনের QR স্ক্যান করুন। স্ক্যান হলেই দুজন স্বয়ংক্রিয়ভাবে বন্ধু হবেন।", color = Muted, fontSize = 12.sp)
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = { showMyQr = true }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(50), border = BorderStroke(1.dp, Accent)) {
-                                Text("আমার QR দেখান")
-                            }
-                            Button(onClick = { startQrScan() }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(50)) {
-                                Text("QR স্ক্যান করুন")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // প্রোফাইল, ছবি এবং পাবলিক বন্ধু-চাই সেটিং
-            item {
-                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("প্রোফাইল ও বন্ধু খোঁজা", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.weight(1f)) {
-                                Text("বন্ধু চাই", fontWeight = FontWeight.SemiBold, color = Ink)
-                                Text("পাবলিক তালিকায় দেখাতে সুইচ চালু করুন", color = Muted, fontSize = 12.sp)
-                            }
-                            Switch(checked = me.discoverable, onCheckedChange = { Session.setDiscoverable(it) })
-                        }
-                        Text(
-                            if (me.discoverable) "আপনার আইডি ও নাম পাবলিক তালিকায় দেখা যাচ্ছে।" else "‘বন্ধু চাই’ চালু করলে অন্যরা আপনার আইডি দেখতে ও রিকুয়েস্ট পাঠাতে পারবে।",
-                            color = Muted, fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // বন্ধু যোগ
-            item {
-                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("বন্ধু যোগ করুন", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
-                        Spacer(Modifier.height(8.dp))
+                    Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = friendUid,
-                                onValueChange = { friendUid = it },
-                                placeholder = { Text("বন্ধুর আইডি") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(16.dp),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFFAFBFF)),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(Modifier.size(8.dp))
-                            Button(
-                                onClick = { Session.sendFriendRequest(friendUid) { friendUid = "" } },
-                                enabled = friendUid.isNotBlank(),
-                                shape = RoundedCornerShape(50)
+                            Box(Modifier.size(56.dp).clickable { photoPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
+                                Avatar(me.username, 52.dp, photoUrl = me.profilePhoto)
+                                Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            Spacer(Modifier.size(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(me.username, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(me.uid, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            IconButton(onClick = {
+                                clipboard.setText(AnnotatedString(me.uid))
+                                Session.toast("কপি হয়েছে")
+                            }) { Icon(Icons.Filled.ContentCopy, contentDescription = "আইডি কপি", tint = Accent) }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CompactAction(Icons.Filled.QrCode, "আমার QR", Modifier.weight(1f)) { showMyQr = true }
+                            CompactAction(Icons.Filled.QrCodeScanner, "স্ক্যান", Modifier.weight(1f)) { startQrScan() }
+                            Row(
+                                Modifier.weight(1.3f).height(36.dp).clip(RoundedCornerShape(50)).background(Canvas)
+                                    .border(1.dp, Line, RoundedCornerShape(50)).padding(start = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(Icons.Filled.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text("বন্ধু চাই", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
+                                Switch(checked = me.discoverable, onCheckedChange = { Session.setDiscoverable(it) }, modifier = Modifier.scale(0.7f))
+                            }
+                            CompactAction(Icons.Filled.PersonAdd, "বন্ধু যোগ", Modifier.weight(1.1f), active = showAddField) { showAddField = !showAddField }
+                        }
+                        if (showAddField) {
+                            Spacer(Modifier.height(10.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = friendUid,
+                                    onValueChange = { friendUid = it },
+                                    placeholder = { Text("বন্ধুর আইডি") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFFAFBFF)),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.size(8.dp))
+                                Box(
+                                    Modifier.size(48.dp).clip(CircleShape)
+                                        .background(if (friendUid.isNotBlank()) Accent else Line)
+                                        .clickable(enabled = friendUid.isNotBlank()) {
+                                            Session.sendFriendRequest(friendUid) { friendUid = ""; showAddField = false }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) { Icon(Icons.Filled.Add, contentDescription = "রিকুয়েস্ট পাঠান", tint = Color.White) }
                             }
                         }
                     }
                 }
             }
-
-            // রিকুয়েস্ট
+            // ---- চ্যাট ট্যাব: সাম্প্রতিক চ্যাট লিস্ট ----
+            item {
+                OutlinedTextField(value = friendSearch, onValueChange = { friendSearch = it },
+                    placeholder = { Text("নাম বা আইডি দিয়ে খুঁজুন") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color.White))
+            }
+            val sortedFriends = filteredFriends.sortedWith(
+                compareByDescending<String> { Session.lastPreview[it]?.date ?: 0L }.thenBy { Session.displayName(it).lowercase() }
+            )
+            if (me.friends.isEmpty()) {
+                item {
+                    Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { Text("💬", fontSize = 38.sp) }
+                        Spacer(Modifier.height(12.dp))
+                        Text("এখনো কোনো চ্যাট নেই", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
+                    }
+                }
+            } else if (sortedFriends.isEmpty()) {
+                item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
+            }
+            items(sortedFriends, key = { "chat_$it" }) { uid -> ChatListRow(uid) }
+                }
+                else -> {
             if (me.requests.isNotEmpty()) {
                 item { Text("ফ্রেন্ড রিকুয়েস্ট (${me.requests.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
                 items(me.requests, key = { "req_$it" }) { uid ->
@@ -272,53 +276,23 @@ fun HomeScreen() {
                 }
             }
 
-            // বন্ধু এবং বন্ধু হতে আগ্রহী ইউজার — দুটি ট্যাব
-            item {
-                TabRow(selectedTabIndex = peopleTab, containerColor = Color.Transparent, contentColor = Accent,
-                    divider = {}, modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White)) {
-                    Tab(selected = peopleTab == 0, onClick = { peopleTab = 0 }, text = { Text("বন্ধুরা (${me.friends.size})") })
-                    Tab(selected = peopleTab == 1, onClick = { peopleTab = 1; Session.refreshDiscoverableUsers() }, text = { Text("বন্ধু চাই (${Session.discoverableUsers.size})") })
-                }
-            }
-            if (peopleTab == 0) {
-                item {
-                    OutlinedTextField(value = friendSearch, onValueChange = { friendSearch = it },
-                        placeholder = { Text("নাম বা আইডি দিয়ে বন্ধু খুঁজুন") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color.White))
-                }
-                if (me.friends.isEmpty()) item { Text("এখনো কাউকে যোগ করেননি", color = Muted) }
-                else if (filteredFriends.isEmpty()) item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
-                items(filteredFriends, key = { "fr_$it" }) { uid ->
-                    val unread = Session.unread[uid] ?: 0
-                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line),
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { Session.openConversation(uid) }) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(Session.displayName(uid), 48.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
-                            Spacer(Modifier.size(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(Session.displayName(uid), fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Ink)
-                                Text(if (Session.online[uid] == true) "অনলাইন" else uid, fontSize = 12.sp, color = if (Session.online[uid] == true) Success else Muted)
-                            }
-                            if (unread > 0) Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 2.dp), contentAlignment = Alignment.Center) { Text(unread.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-                        }
-                    }
-                }
-            } else {
-                item { Text("যারা বন্ধু হতে আগ্রহী", fontWeight = FontWeight.SemiBold, color = Ink) }
-                if (Session.discoverableUsers.isEmpty()) item { Text("এখনো কেউ ‘বন্ধু চাই’ চালু করেননি।", color = Muted) }
-                items(Session.discoverableUsers.filter { it.uid !in me.friends && it.uid !in me.requests && it.uid != me.uid }, key = { "discover_${it.uid}" }) { person ->
-                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(person.username, 46.dp, photoUrl = person.profilePhoto)
-                            Spacer(Modifier.size(10.dp))
-                            Column(Modifier.weight(1f)) { Text(person.username, fontWeight = FontWeight.SemiBold, color = Ink); Text(person.uid, color = Muted, fontSize = 12.sp) }
-                            Button(onClick = { Session.sendFriendRequest(person.uid) {} }, shape = RoundedCornerShape(50)) { Text("বন্ধু হন") }
-                        }
+            // ---- মানুষ ট্যাব: বন্ধু হতে আগ্রহীরা ----
+            item { Text("যারা বন্ধু হতে আগ্রহী", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
+            val discoverList = Session.discoverableUsers.filter { it.uid !in me.friends && it.uid !in me.requests && it.uid != me.uid }
+            if (discoverList.isEmpty()) item { Text("এখনো কেউ ‘বন্ধু চাই’ চালু করেননি।", color = Muted) }
+            items(discoverList, key = { "discover_${it.uid}" }) { person ->
+                Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Avatar(person.username, 46.dp, photoUrl = person.profilePhoto)
+                        Spacer(Modifier.size(10.dp))
+                        Column(Modifier.weight(1f)) { Text(person.username, fontWeight = FontWeight.SemiBold, color = Ink); Text(person.uid, color = Muted, fontSize = 12.sp) }
+                        Button(onClick = { Session.sendFriendRequest(person.uid) {} }, shape = RoundedCornerShape(50)) { Text("বন্ধু হন") }
                     }
                 }
             }
-            item { Spacer(Modifier.navigationBarsPadding().height(8.dp)) }
+                }
+            }
+            item { Spacer(Modifier.height(8.dp)) }
         }
     }
 
@@ -332,7 +306,6 @@ fun HomeScreen() {
                     Spacer(Modifier.height(8.dp))
                     Text(me.username, fontWeight = FontWeight.Bold, color = Ink)
                     Text(me.uid, color = Muted, fontSize = 12.sp)
-                    Text("শুধু যাকে বন্ধু করতে চান, তাকেই এই QR দেখান।", color = Muted, fontSize = 12.sp)
                 }
             },
             confirmButton = { TextButton(onClick = { showMyQr = false }) { Text("বন্ধ") }
@@ -379,5 +352,76 @@ private fun createFriendQrBitmap(uid: String): Bitmap {
         for (x in 0 until 640) for (y in 0 until 640) {
             bitmap.setPixel(x, y, if (matrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE)
         }
+    }
+}
+
+
+private val chatTimeFmt = java.text.SimpleDateFormat("hh:mm a", java.util.Locale("bn", "BD"))
+private val chatDateFmt = java.text.SimpleDateFormat("dd MMM", java.util.Locale("bn", "BD"))
+
+private fun formatChatTime(ms: Long): String {
+    val now = java.util.Calendar.getInstance()
+    val then = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    val sameDay = now.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR) &&
+        now.get(java.util.Calendar.DAY_OF_YEAR) == then.get(java.util.Calendar.DAY_OF_YEAR)
+    return if (sameDay) chatTimeFmt.format(java.util.Date(ms)) else chatDateFmt.format(java.util.Date(ms))
+}
+
+@Composable
+private fun ChatListRow(uid: String) {
+    val unread = Session.unread[uid] ?: 0
+    val last = Session.lastPreview[uid]
+    val online = Session.online[uid] == true
+    val subtitle = when {
+        last != null -> (if (last.mine) "আপনি: " else "") + last.text
+        online -> "অনলাইন"
+        else -> ""
+    }
+    Surface(
+        shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { Session.openConversation(uid) }
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Avatar(Session.displayName(uid), 52.dp, online = online, photoUrl = Session.profilePhotos[uid])
+            Spacer(Modifier.size(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    Session.displayName(uid), fontWeight = if (unread > 0) FontWeight.ExtraBold else FontWeight.SemiBold,
+                    fontSize = 16.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = if (unread > 0) Ink else if (last == null && online) Success else Muted,
+                    fontWeight = if (unread > 0) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+            Spacer(Modifier.size(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                if (last != null) Text(formatChatTime(last.date), fontSize = 11.sp, color = if (unread > 0) Accent else Muted)
+                if (unread > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 2.dp), contentAlignment = Alignment.Center) {
+                        Text(unread.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun CompactAction(icon: ImageVector, label: String, modifier: Modifier, active: Boolean = false, onClick: () -> Unit) {
+    Row(
+        modifier.height(36.dp).clip(RoundedCornerShape(50))
+            .background(if (active) Accent else Them)
+            .clickable(onClick = onClick).padding(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = if (active) Color.White else Accent, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(4.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (active) Color.White else Accent, maxLines = 1)
     }
 }

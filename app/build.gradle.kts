@@ -76,8 +76,11 @@ dependencies {
     implementation("io.getstream:stream-webrtc-android:1.1.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
-    // Maintained FFmpegKit fork. GPL variant includes libx265 used by VideoTranscoder.
-    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full-gpl:6.0.3")
+    // Media3: Transformer = হার্ডওয়্যার H.264 ভিডিও কমপ্রেস, ExoPlayer/UI = অ্যাপের ভেতরে ভিডিও ও ভয়েস প্লেয়ার
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-effect:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
 }
 
 // google-services.json must belong to applicationId com.adda.chatkt.

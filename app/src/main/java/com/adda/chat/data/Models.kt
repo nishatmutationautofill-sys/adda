@@ -42,6 +42,8 @@ data class ChatMessage(
     }
 }
 
+data class ChatPreview(val text: String, val date: Long, val mine: Boolean)
+
 data class ToastMsg(val id: Int, val text: String)
 
 fun JSONArray?.toStringList(): List<String> {

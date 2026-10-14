@@ -64,6 +64,8 @@ object Session {
     val profilePhotos = mutableStateMapOf<String, String>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
+    /** চ্যাট লিস্টে শেষ মেসেজের প্রিভিউ (শুধু মেমরিতে থাকে — এনক্রিপ্টেড মেসেজ ডিস্কে সেভ হয় না) */
+    val lastPreview = mutableStateMapOf<String, ChatPreview>()
     val messages = mutableStateListOf<ChatMessage>()
     val discoverableUsers = mutableStateListOf<DiscoverableUser>()
 
@@ -252,6 +254,7 @@ object Session {
         profilePhotos.clear()
         online.clear()
         unread.clear()
+        lastPreview.clear()
     }
 
     // ---------- বন্ধু ----------
@@ -464,10 +467,25 @@ object Session {
         } else withServerExpiry
         seenIds.add(shown.id)
         messages.add(shown)
+        recordPreview(if (shown.from == myUid) shown.to else shown.from, shown, shown.from == myUid)
         if (shown.secure && shown.expiresAt > 0) scheduleSecureExpiry(shown)
         if (shown.secure && shown.to == myUid && m.expiresAt == 0L) {
             socket?.emit("secure:opened", JSONObject().put("id", shown.id))
         }
+    }
+
+    private fun recordPreview(peer: String, m: ChatMessage, mine: Boolean) {
+        val n = m.fileName.orEmpty().lowercase()
+        val text = when {
+            m.secure -> "🔒 সিকিউর মেসেজ"
+            m.isImage -> "🖼️ ছবি"
+            m.isFile && listOf(".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus").any { n.endsWith(it) } -> "🎙️ ভয়েস মেসেজ"
+            m.isFile && listOf(".mp4", ".webm", ".3gp", ".mov", ".mkv", ".m4v").any { n.endsWith(it) } -> "🎬 ভিডিও"
+            m.isFile -> "📎 ${m.fileName ?: "ফাইল"}"
+            else -> m.text
+        }
+        val existing = lastPreview[peer]
+        if (existing == null || m.date >= existing.date) lastPreview[peer] = ChatPreview(text, m.date, mine)
     }
 
     private fun scheduleSecureExpiry(m: ChatMessage) {
@@ -498,6 +516,7 @@ object Session {
             }
         } else if (m.from != myUid) {
             unread[m.from] = (unread[m.from] ?: 0) + 1
+            lastPreview[m.from] = ChatPreview(preview, m.date, false)
             if (appInForeground) toast("নতুন মেসেজ এসেছে: ${displayName(m.from)}")
             else Notifier.message(appContext, displayName(m.from), preview, m.from.hashCode())
         }
@@ -577,7 +596,7 @@ object Session {
                     if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
                     if (durationMs > 60L * 1000L) throw IllegalArgumentException("১ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
                     mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে…"
-                    val converted = withContext(Dispatchers.IO) { VideoTranscoder.transcode(appContext, uri, durationMs) }
+                    val converted = VideoTranscoder.transcode(appContext, uri, durationMs)
                     if (converted != null) {
                         transcodedVideo = converted.file
                         withContext(Dispatchers.IO) { FileUpload.prepare(appContext, android.net.Uri.fromFile(converted.file)) }

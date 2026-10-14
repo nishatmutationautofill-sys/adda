@@ -185,7 +185,6 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { Text("👋", fontSize = 40.sp) }
                     Spacer(Modifier.size(12.dp))
                     Text("কথা বলা শুরু করুন", fontWeight = FontWeight.Bold, color = Ink)
-                    Text("আপনার মেসেজ এখানে দেখা যাবে।", color = Muted, fontSize = 13.sp)
                 }
             }
             LazyColumn(
@@ -260,7 +259,6 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                             color = if (secureMode) Color(0xFFB3261E) else Muted)
                     }
                     Spacer(Modifier.weight(1f))
-                    if (secureMode) Text("স্বয়ংক্রিয় ডিলেট", color = Color(0xFFB3261E), fontSize = 12.sp)
                 }
                 if (secureMode) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -358,8 +356,6 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             title = { Text("ইমোজি প্যাক") },
             text = {
                 Column {
-                    Text("ইমোজি ট্যাপ করলে মেসেজে যোগ হবে। JSON ফাইল থেকে নিজের প্যাক ইম্পোর্ট করতে পারবেন।")
-                    Spacer(Modifier.size(8.dp))
                     androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                         columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(6),
                         modifier = Modifier.fillMaxWidth().sizeIn(maxHeight = 220.dp)
@@ -436,6 +432,12 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                     .border(1.dp, Line, RoundedCornerShape(18.dp))
                     .clickable { onOpenImage(url) }
             )
+        } else if (m.isFile && isAudioFile(m.fileName)) {
+            Box(bubbleModifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                VoiceMessagePlayer(Api.absoluteUrl(m.fileUrl.orEmpty()), mine)
+            }
+        } else if (m.isFile && isVideoFile(m.fileName)) {
+            VideoMessageCard(Api.absoluteUrl(m.fileUrl.orEmpty()))
         } else if (m.isFile) {
             val url = Api.absoluteUrl(m.fileUrl.orEmpty())
             val fileName = m.fileName ?: "ফাইল"

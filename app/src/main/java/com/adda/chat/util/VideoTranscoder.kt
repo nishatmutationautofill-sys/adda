@@ -1,63 +1,118 @@
 package com.adda.chat.util
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.ReturnCode
+import android.os.Handler
+import android.os.Looper
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
-import java.io.IOException
+import kotlin.coroutines.resume
 
 /**
- * পাঠানোর আগে ভিডিও ছোট করে: MP4 / H.264, সর্বোচ্চ 480p, 30 fps।
- * H.265 (libx265) ফোনে অনেক ভারী ও অস্থির ছিল, এটাই অ্যাপ ক্র্যাশের কারণ — তাই H.264।
+ * পাঠানোর আগে ভিডিও ছোট করে: MP4 / H.264, সর্বোচ্চ 480p, ~900 kbps।
+ * Media3 Transformer ফোনের হার্ডওয়্যার এনকোডার ব্যবহার করে — দ্রুত, কম ব্যাটারি, APK ছোট।
  * কনভার্ট ব্যর্থ হলে null দেয়; তখন কলার আসল ফাইলই পাঠায়, অ্যাপ ক্র্যাশ করে না।
  */
 object VideoTranscoder {
     private const val MAX_INPUT_DURATION_MS = 60L * 1000L
     private const val MAX_OUTPUT_BYTES = 50L * 1024L * 1024L
+    private const val TIMEOUT_MS = 120_000L
 
     data class Result(val file: File, val durationMs: Long)
 
-    fun transcode(context: Context, sourceUri: Uri, durationMs: Long): Result? {
+    suspend fun transcode(context: Context, sourceUri: Uri, durationMs: Long): Result? {
         require(durationMs in 1..MAX_INPUT_DURATION_MS) {
             if (durationMs > MAX_INPUT_DURATION_MS) "১ মিনিটের বেশি ভিডিও পাঠানো যাবে না" else "ভিডিওর দৈর্ঘ্য পড়া যায়নি"
         }
         val dir = File(context.cacheDir, "video_transcode").apply { mkdirs() }
         dir.listFiles()?.forEach { runCatching { it.delete() } }
-        val input = File.createTempFile("input_", ".video", dir)
-        val output = File.createTempFile("adda_", ".mp4", dir)
+        val output = File(dir, "adda_${System.currentTimeMillis()}.mp4")
         return try {
-            context.contentResolver.openInputStream(sourceUri)?.use { src ->
-                input.outputStream().use { dst -> src.copyTo(dst) }
-            } ?: throw IOException("ভিডিও ফাইল পড়া যাচ্ছে না")
-
-            val args = arrayOf(
-                "-y", "-i", input.absolutePath,
-                "-t", "60",
-                "-vf", "scale=w='min(854,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                "-maxrate", "900k", "-bufsize", "1800k",
-                "-threads", "2",
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "64k", "-ac", "2",
-                "-movflags", "+faststart",
-                output.absolutePath
-            )
-            val session = FFmpegKit.executeWithArguments(args)
-            if (!ReturnCode.isSuccess(session.returnCode) || !output.exists() || output.length() <= 0L ||
-                output.length() > MAX_OUTPUT_BYTES) {
-                output.delete()
+            val height = withContext(Dispatchers.IO) { displayHeight(context, sourceUri) }
+            val ok = withTimeoutOrNull(TIMEOUT_MS) { runTransformer(context, sourceUri, output, height) } ?: false
+            if (ok && output.exists() && output.length() in 1..MAX_OUTPUT_BYTES) Result(output, durationMs)
+            else {
+                runCatching { output.delete() }
                 null
-            } else Result(output, durationMs)
-        } catch (e: IllegalArgumentException) {
-            output.delete()
+            }
+        } catch (e: CancellationException) {
+            runCatching { output.delete() }
             throw e
         } catch (_: Throwable) {
-            // UnsatisfiedLinkError / OutOfMemoryError সহ সব — ক্র্যাশ নয়, আসল ফাইলে ফিরে যাওয়া
             runCatching { output.delete() }
             null
-        } finally {
-            runCatching { input.delete() }
         }
+    }
+
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private suspend fun runTransformer(ctx: Context, src: Uri, out: File, displayHeight: Int): Boolean =
+        withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
+                val videoEffects = ArrayList<Effect>()
+                // ছোট ভিডিও বড় করা হবে না; শুধু ৪৮০p-র বেশি হলে নামানো হবে
+                if (displayHeight > 480) videoEffects.add(Presentation.createForHeight(480))
+                val edited = EditedMediaItem.Builder(MediaItem.fromUri(src))
+                    .setEffects(Effects(emptyList(), videoEffects))
+                    .build()
+                val encoder = DefaultEncoderFactory.Builder(ctx)
+                    .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(900_000).build())
+                    .build()
+                val transformer = Transformer.Builder(ctx)
+                    .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                    .setEncoderFactory(encoder)
+                    .addListener(object : Transformer.Listener {
+                        override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                            if (cont.isActive) cont.resume(true)
+                        }
+
+                        override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                            if (cont.isActive) cont.resume(false)
+                        }
+                    })
+                    .build()
+                cont.invokeOnCancellation {
+                    Handler(Looper.getMainLooper()).post { runCatching { transformer.cancel() } }
+                }
+                try {
+                    transformer.start(edited, out.absolutePath)
+                } catch (_: Throwable) {
+                    if (cont.isActive) cont.resume(false)
+                }
+            }
+        }
+
+    /** ঘোরানো (rotation) হিসাব করে ভিডিওর আসল দেখানোর উচ্চতা */
+    private fun displayHeight(ctx: Context, uri: Uri): Int = try {
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(ctx, uri)
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (rot == 90 || rot == 270) w else h
+        } finally {
+            r.release()
+        }
+    } catch (_: Throwable) {
+        0
     }
 }
