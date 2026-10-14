@@ -134,137 +134,89 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
     }
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
-        // গ্রেডিয়েন্ট হেডার — বন্ধু ট্যাবে নিজের বড় প্রোফাইল ছবি হেডারের ওপর ভেসে থাকে
-        Box(Modifier.fillMaxWidth().zIndex(1f)) {
-            Surface(color = Accent, shadowElevation = 6.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding()
-                        .padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = if (tab == 0) 64.dp else 20.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-                        Text("A", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
-                    }
-                    Spacer(Modifier.size(12.dp))
+        // Compact blue-and-white top banner
+        Surface(
+            modifier = Modifier.fillMaxWidth().zIndex(1f),
+            color = Color.White,
+            shadowElevation = 4.dp,
+            shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
+        ) {
+            Column(
+                Modifier.fillMaxWidth().background(Color.White).statusBarsPadding()
+                    .padding(start = 12.dp, end = 10.dp, top = 6.dp, bottom = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF1769D2)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("A", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black) }
+                    Spacer(Modifier.size(9.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("আড্ডা Messenger", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                        Text(
-                            Session.connectionLabel,
-                            fontSize = 12.sp,
-                            color = if (Session.socketConnected) Color(0xFFB9FFE5) else Color.White.copy(alpha = 0.78f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        Text("আড্ডা Messenger", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF174A8B), maxLines = 1)
+                        Text(Session.connectionLabel, fontSize = 11.sp,
+                            color = if (Session.socketConnected) Color(0xFF168653) else Muted,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Box(
+                        Modifier.size(42.dp).clip(CircleShape).border(2.dp, Color(0xFFD8E7FA), CircleShape)
+                            .clickable { profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true) },
+                        contentAlignment = Alignment.Center
+                    ) { Avatar(me.username, 38.dp, photoUrl = me.profilePhoto) }
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color(0xFF174A8B))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
+                            menuOpen = false; clipboard.setText(AnnotatedString(me.uid)); Session.toast("আপনার আইডি কপি হয়েছে")
+                        })
+                        DropdownMenuItem(text = { Text("লগআউট") }, onClick = { menuOpen = false; Session.logout() })
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CompactAction(Icons.Filled.QrCode, "আমার QR", Modifier.weight(1f)) { showMyQr = true }
+                    CompactAction(Icons.Filled.QrCodeScanner, "স্ক্যান", Modifier.weight(1f)) { startQrScan() }
+                    CompactAction(Icons.Filled.PersonAdd, "বন্ধু যোগ", Modifier.weight(1.05f), active = showAddField) { showAddField = !showAddField }
+                    Row(
+                        Modifier.weight(1.12f).height(36.dp).clip(RoundedCornerShape(50))
+                            .background(Color(0xFFEAF2FE)).border(1.dp, Color(0xFFD2E3FA), RoundedCornerShape(50))
+                            .padding(start = 8.dp, end = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("বন্ধু চাই", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF174A8B), maxLines = 1)
+                        Switch(checked = me.discoverable, onCheckedChange = { Session.setDiscoverable(it) }, modifier = Modifier.scale(0.68f))
+                    }
+                }
+                if (showAddField) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = friendUid, onValueChange = { friendUid = it },
+                            placeholder = { Text("বন্ধুর আইডি") }, singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF1769D2), unfocusedBorderColor = Line,
+                                focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFF7FAFF)),
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(Modifier.size(8.dp))
+                        Box(Modifier.size(44.dp).clip(CircleShape)
+                            .background(if (friendUid.isNotBlank()) Color(0xFF1769D2) else Line)
+                            .clickable(enabled = friendUid.isNotBlank()) {
+                                Session.sendFriendRequest(friendUid) { friendUid = ""; showAddField = false }
+                            }, contentAlignment = Alignment.Center
+                        ) { Icon(Icons.Filled.Add, contentDescription = "রিকুয়েস্ট পাঠান", tint = Color.White) }
                     }
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color.White) }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
-                                menuOpen = false
-                                clipboard.setText(AnnotatedString(me.uid))
-                                Session.toast("আপনার আইডি কপি হয়েছে")
-                            })
-                            DropdownMenuItem(text = { Text("লগআউট") }, onClick = {
-                                menuOpen = false
-                                Session.logout()
-                            })
-                        }
-                    }
-                }
-            }
-            if (tab == 0) {
-                // ভেসে থাকা বড় প্রোফাইল ছবি (পপআপ স্টাইল): অর্ধেক হেডারে, অর্ধেক বাইরে
-                Box(
-                    Modifier.align(Alignment.BottomCenter).offset(y = 54.dp)
-                        .shadow(18.dp, CircleShape)
-                        .clip(CircleShape).background(Color.White).padding(5.dp)
-                        .clickable {
-                            profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Avatar(me.username, 108.dp, photoUrl = me.profilePhoto)
-                }
-                Box(
-                    Modifier.align(Alignment.BottomCenter).offset(x = 44.dp, y = 54.dp)
-                        .size(32.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(Accent)
-                        .border(2.dp, Color.White, CircleShape)
-                        .clickable { photoPicker.launch("image/*") },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "ছবি বদলান", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
         }
 
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = if (tab == 0) 0.dp else 18.dp, bottom = 16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             when (tab) {
                 0 -> {
-            // ভেসে থাকা প্রোফাইল ছবির নিচের জায়গা + নাম
-            item {
-                Column(Modifier.fillMaxWidth().padding(top = 66.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(me.username, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("বন্ধু তালিকা (${me.friends.size})", fontSize = 13.sp, color = Muted, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            item {
-                Surface(shape = RoundedCornerShape(26.dp), color = Color.White, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("আমার আইডি", color = Muted, fontSize = 11.sp)
-                                Text(me.uid, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            IconButton(onClick = {
-                                clipboard.setText(AnnotatedString(me.uid))
-                                Session.toast("কপি হয়েছে")
-                            }) { Icon(Icons.Filled.ContentCopy, contentDescription = "আইডি কপি", tint = Accent) }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CompactAction(Icons.Filled.QrCode, "আমার QR", Modifier.weight(1f)) { showMyQr = true }
-                            CompactAction(Icons.Filled.QrCodeScanner, "স্ক্যান", Modifier.weight(1f)) { startQrScan() }
-                            Row(
-                                Modifier.weight(1.3f).height(36.dp).clip(RoundedCornerShape(50)).background(Canvas)
-                                    .border(1.dp, Line, RoundedCornerShape(50)).padding(start = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("বন্ধু চাই", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
-                                Switch(checked = me.discoverable, onCheckedChange = { Session.setDiscoverable(it) }, modifier = Modifier.scale(0.7f))
-                            }
-                            CompactAction(Icons.Filled.PersonAdd, "বন্ধু যোগ", Modifier.weight(1.1f), active = showAddField) { showAddField = !showAddField }
-                        }
-                        if (showAddField) {
-                            Spacer(Modifier.height(10.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = friendUid,
-                                    onValueChange = { friendUid = it },
-                                    placeholder = { Text("বন্ধুর আইডি") },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFFAFBFF)),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(Modifier.size(8.dp))
-                                Box(
-                                    Modifier.size(48.dp).clip(CircleShape)
-                                        .background(if (friendUid.isNotBlank()) Accent else Line)
-                                        .clickable(enabled = friendUid.isNotBlank()) {
-                                            Session.sendFriendRequest(friendUid) { friendUid = ""; showAddField = false }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) { Icon(Icons.Filled.Add, contentDescription = "রিকুয়েস্ট পাঠান", tint = Color.White) }
-                            }
-                        }
-                    }
-                }
-            }
             // ---- চ্যাট ট্যাব: সাম্প্রতিক চ্যাট লিস্ট ----
             // ---- স্টোরি-স্টাইল: এখন অনলাইনে থাকা বন্ধুরা ----
             val onlineFriends = me.friends.filter { Session.online[it] == true }
