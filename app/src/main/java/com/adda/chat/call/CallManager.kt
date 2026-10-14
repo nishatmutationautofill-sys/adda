@@ -1,0 +1,554 @@
+package com.adda.chat.call
+
+import android.content.Context
+import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.SystemClock
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.adda.chat.data.Session
+import com.adda.chat.util.Notifier
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import org.json.JSONObject
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
+import org.webrtc.DataChannel
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
+import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
+import org.webrtc.MediaStream
+import org.webrtc.PeerConnection
+import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpReceiver
+import org.webrtc.RtpTransceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoCapturer
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
+import org.webrtc.AudioSource
+import org.webrtc.AudioTrack
+import org.webrtc.audio.JavaAudioDeviceModule
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/**
+ * অডিও/ভিডিও কল (WebRTC) — ওয়েব ভার্সনের সিগন্যালিং (webrtc:offer/answer/candidate/hangup) এর সাথে সামঞ্জস্যপূর্ণ।
+ * নয়েজ ক্যান্সেলেশন: সফটওয়্যার AEC + NS + AGC + হাই-পাস ফিল্টার চালু।
+ * ভিডিও: 480x360 @ 20fps, ~350kbps; অডিও ~32kbps — যেন কল স্মুথ চলে।
+ */
+object CallManager {
+    enum class Phase { None, Outgoing, Incoming, Connecting, Connected }
+
+    var phase by mutableStateOf(Phase.None)
+    var callKind by mutableStateOf("audio")
+    var peerUid by mutableStateOf("")
+    var status by mutableStateOf("")
+    var remoteVideo by mutableStateOf<VideoTrack?>(null)
+    var localVideo by mutableStateOf<VideoTrack?>(null)
+    var micMuted by mutableStateOf(false)
+    var camOff by mutableStateOf(false)
+    var speakerOn by mutableStateOf(false)
+    var connectedAt by mutableStateOf(0L)
+
+    private const val VIDEO_W = 480
+    private const val VIDEO_H = 360
+    private const val VIDEO_FPS = 20
+    private const val VIDEO_MAX_BPS = 350_000
+    private const val VIDEO_MAX_FPS = 24
+    private const val AUDIO_MAX_BPS = 32_000
+
+    private lateinit var ctx: Context
+    val eglBase: EglBase by lazy { EglBase.create() }
+
+    private var factory: PeerConnectionFactory? = null
+    private var pc: PeerConnection? = null
+    private var audioSource: AudioSource? = null
+    private var audioTrack: AudioTrack? = null
+    private var videoSource: VideoSource? = null
+    private var videoTrack: VideoTrack? = null
+    private var capturer: VideoCapturer? = null
+    private var surfaceHelper: SurfaceTextureHelper? = null
+
+    private var pendingOffer: JSONObject? = null
+    private val pendingCandidates = mutableListOf<IceCandidate>()
+    private var ringtone: Ringtone? = null
+    private var prevAudioMode = AudioManager.MODE_NORMAL
+
+    fun init(context: Context) {
+        ctx = context.applicationContext
+    }
+
+    // ---------------------------------------------------------------- factory
+
+    private fun ensureFactory(): PeerConnectionFactory {
+        factory?.let { return it }
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
+        )
+        // সফটওয়্যার AEC/NS ব্যবহার — সব ডিভাইসে সমান মানের নয়েজ ক্যান্সেলেশনের জন্য
+        val adm = JavaAudioDeviceModule.builder(ctx)
+            .setUseHardwareAcousticEchoCanceler(false)
+            .setUseHardwareNoiseSuppressor(false)
+            .createAudioDeviceModule()
+        val f = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(adm)
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
+            .createPeerConnectionFactory()
+        factory = f
+        return f
+    }
+
+    private fun createPeerAndMedia(kind: String): PeerConnection {
+        val f = ensureFactory()
+        val cfg = PeerConnection.RTCConfiguration(
+            listOf(
+                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+            )
+        ).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+        }
+        val p = f.createPeerConnection(cfg, observer) ?: throw IllegalStateException("পিয়ার কানেকশন তৈরি হয়নি")
+        pc = p
+
+        // অডিও (নয়েজ ক্যান্সেলেশন সহ)
+        val audioConstraints = MediaConstraints().apply {
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression2", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+        }
+        val aSrc = f.createAudioSource(audioConstraints)
+        val aTrack = f.createAudioTrack("audio0", aSrc)
+        audioSource = aSrc
+        audioTrack = aTrack
+        p.addTrack(aTrack, listOf("stream0"))
+
+        // ভিডিও (কম রেজোলিউশন)
+        if (kind == "video") {
+            val enumerator = Camera2Enumerator(ctx)
+            val names = enumerator.deviceNames
+            val camName = names.firstOrNull { enumerator.isFrontFacing(it) } ?: names.firstOrNull()
+                ?: throw IllegalStateException("ক্যামেরা পাওয়া যায়নি")
+            val cap = enumerator.createCapturer(camName, null) ?: throw IllegalStateException("ক্যামেরা চালু করা যায়নি")
+            val helper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
+            val vSrc = f.createVideoSource(cap.isScreencast)
+            cap.initialize(helper, ctx, vSrc.capturerObserver)
+            cap.startCapture(VIDEO_W, VIDEO_H, VIDEO_FPS)
+            val vTrack = f.createVideoTrack("video0", vSrc)
+            capturer = cap
+            surfaceHelper = helper
+            videoSource = vSrc
+            videoTrack = vTrack
+            p.addTrack(vTrack, listOf("stream0"))
+            localVideo = vTrack
+        }
+        return p
+    }
+
+    private fun tuneSenders() {
+        val p = pc ?: return
+        for (sender in p.senders) {
+            try {
+                val track = sender.track() ?: continue
+                val params = sender.parameters
+                if (params.encodings.isEmpty()) continue
+                val enc = params.encodings[0]
+                if (track.kind() == "video") {
+                    enc.maxBitrateBps = VIDEO_MAX_BPS
+                    enc.maxFramerate = VIDEO_MAX_FPS
+                } else {
+                    enc.maxBitrateBps = AUDIO_MAX_BPS
+                }
+                sender.setParameters(params)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- observer
+
+    private val observer = object : PeerConnection.Observer {
+        override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
+
+        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+            Session.scope.launch {
+                when (state) {
+                    PeerConnection.IceConnectionState.CONNECTED,
+                    PeerConnection.IceConnectionState.COMPLETED -> markConnected()
+                    PeerConnection.IceConnectionState.FAILED -> {
+                        if (phase != Phase.None) {
+                            Session.toast("কল সংযোগ ব্যর্থ। TURN সার্ভার প্রয়োজন হতে পারে।")
+                            endCall(true)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+
+        override fun onIceCandidate(candidate: IceCandidate?) {
+            if (candidate == null) return
+            val to = peerUid
+            Session.scope.launch {
+                if (to.isEmpty()) return@launch
+                Session.emit(
+                    "webrtc:candidate",
+                    JSONObject().put("to", to).put(
+                        "candidate",
+                        JSONObject()
+                            .put("candidate", candidate.sdp)
+                            .put("sdpMid", candidate.sdpMid)
+                            .put("sdpMLineIndex", candidate.sdpMLineIndex)
+                    )
+                )
+            }
+        }
+
+        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+        override fun onAddStream(stream: MediaStream?) {}
+        override fun onRemoveStream(stream: MediaStream?) {}
+        override fun onDataChannel(channel: DataChannel?) {}
+        override fun onRenegotiationNeeded() {}
+        override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
+
+        override fun onTrack(transceiver: RtpTransceiver?) {
+            val track = transceiver?.receiver?.track()
+            if (track is VideoTrack) Session.scope.launch { remoteVideo = track }
+        }
+    }
+
+    private fun markConnected() {
+        if (phase == Phase.None || phase == Phase.Connected) return
+        phase = Phase.Connected
+        connectedAt = SystemClock.elapsedRealtime()
+        status = "কল সংযুক্ত হয়েছে"
+        tuneSenders()
+    }
+
+    // ---------------------------------------------------------------- outgoing
+
+    fun startCall(kind: String, peer: String) {
+        if (phase != Phase.None) {
+            Session.toast("একটি কল ইতিমধ্যে চলছে")
+            return
+        }
+        if (!Session.socketConnected) {
+            Session.toast("সার্ভারের সঙ্গে সংযোগ নেই")
+            return
+        }
+        Session.scope.launch {
+            try {
+                callKind = if (kind == "video") "video" else "audio"
+                peerUid = peer
+                phase = Phase.Outgoing
+                status = "কল করা হচ্ছে: ${Session.displayName(peer)}"
+                resetControls()
+                startAudioMode()
+                val p = createPeerAndMedia(callKind)
+                val offer = p.createOfferSuspend()
+                p.setLocalSuspend(offer)
+                tuneSenders()
+                Session.emit(
+                    "webrtc:offer",
+                    JSONObject().put("to", peer).put("offer", sdpJson(offer)).put("kind", callKind)
+                )
+            } catch (e: Exception) {
+                Session.toast("কল শুরু করা যায়নি: ${e.message}")
+                endCall(false)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- incoming
+
+    private fun handleOffer(from: String, data: JSONObject) {
+        if (Session.me?.friends?.contains(from) != true) return
+        if (phase != Phase.None) {
+            Session.emit("webrtc:hangup", JSONObject().put("to", from).put("reason", "busy"))
+            return
+        }
+        if (data.optJSONObject("offer") == null) return
+        pendingOffer = data
+        pendingCandidates.clear()
+        peerUid = from
+        callKind = if (data.optString("kind") == "video") "video" else "audio"
+        phase = Phase.Incoming
+        resetControls()
+        status = if (callKind == "video") "ভিডিও কল আসছে" else "অডিও কল আসছে"
+        startRingtone()
+        if (!Session.appInForeground) {
+            Notifier.incomingCall(ctx, Session.displayName(from), callKind == "video")
+        }
+    }
+
+    fun acceptCall() {
+        val offerData = pendingOffer ?: return
+        stopRingtone()
+        Notifier.cancelCall(ctx)
+        Session.scope.launch {
+            try {
+                phase = Phase.Connecting
+                status = "${Session.displayName(peerUid)}-এর কল গ্রহণ করা হচ্ছে"
+                Session.openConversation(peerUid)
+                startAudioMode()
+                val p = createPeerAndMedia(callKind)
+                val offer = offerData.getJSONObject("offer")
+                p.setRemoteSuspend(SessionDescription(SessionDescription.Type.OFFER, offer.getString("sdp")))
+                flushCandidates()
+                val answer = p.createAnswerSuspend()
+                p.setLocalSuspend(answer)
+                tuneSenders()
+                Session.emit(
+                    "webrtc:answer",
+                    JSONObject().put("to", peerUid).put("answer", sdpJson(answer))
+                )
+                pendingOffer = null
+                status = "কল সংযুক্ত হচ্ছে…"
+            } catch (e: Exception) {
+                Session.toast("কল গ্রহণ করা যায়নি: ${e.message}")
+                endCall(true)
+            }
+        }
+    }
+
+    fun declineCall() {
+        if (phase != Phase.Incoming) return
+        Session.emit("webrtc:hangup", JSONObject().put("to", peerUid).put("reason", "declined"))
+        endCall(false)
+    }
+
+    // ---------------------------------------------------------------- signaling in
+
+    fun onSignal(event: String, data: JSONObject) {
+        val from = data.optString("from")
+        if (from.isEmpty()) return
+        when (event) {
+            "offer" -> handleOffer(from, data)
+            "answer" -> {
+                if (phase == Phase.None || from != peerUid) return
+                val answer = data.optJSONObject("answer") ?: return
+                Session.scope.launch {
+                    try {
+                        pc?.setRemoteSuspend(SessionDescription(SessionDescription.Type.ANSWER, answer.getString("sdp")))
+                        flushCandidates()
+                        if (phase == Phase.Outgoing) {
+                            phase = Phase.Connecting
+                            status = "অপর পক্ষ কল গ্রহণ করেছেন; সংযোগ হচ্ছে…"
+                        }
+                    } catch (e: Exception) {
+                        Session.toast("কল সংযোগে সমস্যা: ${e.message}")
+                    }
+                }
+            }
+            "candidate" -> {
+                if (phase == Phase.None || from != peerUid) return
+                val c = data.optJSONObject("candidate") ?: return
+                val sdp = c.optString("candidate")
+                if (sdp.isEmpty()) return
+                val mid = if (c.isNull("sdpMid")) null else c.optString("sdpMid")
+                val ice = IceCandidate(mid, c.optInt("sdpMLineIndex", 0), sdp)
+                val p = pc
+                if (p != null && p.remoteDescription != null) p.addIceCandidate(ice) else pendingCandidates.add(ice)
+            }
+            "hangup" -> {
+                if (phase == Phase.None || from != peerUid) return
+                val msg = when (data.optString("reason")) {
+                    "declined" -> "কলটি রিসিভ করা হয়নি (কল রিজেক্ট করা হয়েছে)"
+                    "busy" -> "অপর পক্ষ ব্যস্ত আছেন"
+                    else -> "কল শেষ হয়েছে"
+                }
+                endCall(false)
+                Session.toast(msg)
+            }
+        }
+    }
+
+    private fun flushCandidates() {
+        val p = pc ?: return
+        for (c in pendingCandidates.toList()) {
+            try { p.addIceCandidate(c) } catch (_: Exception) {}
+        }
+        pendingCandidates.clear()
+    }
+
+    // ---------------------------------------------------------------- controls
+
+    fun toggleMute() {
+        micMuted = !micMuted
+        audioTrack?.setEnabled(!micMuted)
+    }
+
+    fun toggleCamera() {
+        camOff = !camOff
+        videoTrack?.setEnabled(!camOff)
+    }
+
+    fun switchCamera() {
+        (capturer as? CameraVideoCapturer)?.switchCamera(null)
+    }
+
+    fun toggleSpeaker() {
+        speakerOn = !speakerOn
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.isSpeakerphoneOn = speakerOn
+    }
+
+    private fun resetControls() {
+        micMuted = false
+        camOff = false
+        connectedAt = 0L
+    }
+
+    // ---------------------------------------------------------------- teardown
+
+    fun endCall(notifyPeer: Boolean) {
+        if (notifyPeer && phase != Phase.None && peerUid.isNotEmpty()) {
+            Session.emit("webrtc:hangup", JSONObject().put("to", peerUid))
+        }
+        stopRingtone()
+        Notifier.cancelCall(ctx)
+        stopAudioMode()
+
+        val oldPc = pc
+        val oldCapturer = capturer
+        val oldVideoTrack = videoTrack
+        val oldVideoSource = videoSource
+        val oldHelper = surfaceHelper
+        val oldAudioTrack = audioTrack
+        val oldAudioSource = audioSource
+
+        pc = null
+        capturer = null
+        videoTrack = null
+        videoSource = null
+        surfaceHelper = null
+        audioTrack = null
+        audioSource = null
+        pendingOffer = null
+        pendingCandidates.clear()
+
+        remoteVideo = null
+        localVideo = null
+        phase = Phase.None
+        peerUid = ""
+        status = ""
+        connectedAt = 0L
+
+        // ভারী কাজ ব্যাকগ্রাউন্ডে (ক্যামেরা বন্ধ করতে একটু সময় লাগে)
+        Thread {
+            try { oldCapturer?.stopCapture() } catch (_: Exception) {}
+            try { oldPc?.close() } catch (_: Exception) {}
+            try { oldCapturer?.dispose() } catch (_: Exception) {}
+            try { oldVideoTrack?.dispose() } catch (_: Exception) {}
+            try { oldVideoSource?.dispose() } catch (_: Exception) {}
+            try { oldHelper?.dispose() } catch (_: Exception) {}
+            try { oldAudioTrack?.dispose() } catch (_: Exception) {}
+            try { oldAudioSource?.dispose() } catch (_: Exception) {}
+            try { oldPc?.dispose() } catch (_: Exception) {}
+        }.start()
+    }
+
+    // ---------------------------------------------------------------- audio routing / ringtone
+
+    private fun startAudioMode() {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        prevAudioMode = am.mode
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        speakerOn = callKind == "video"
+        am.isSpeakerphoneOn = speakerOn
+    }
+
+    private fun stopAudioMode() {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.isSpeakerphoneOn = false
+        am.mode = prevAudioMode
+        speakerOn = false
+    }
+
+    private fun startRingtone() {
+        try {
+            val r = RingtoneManager.getRingtone(ctx, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            if (Build.VERSION.SDK_INT >= 28) r?.isLooping = true
+            r?.play()
+            ringtone = r
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun stopRingtone() {
+        try { ringtone?.stop() } catch (_: Exception) {}
+        ringtone = null
+    }
+
+    private fun sdpJson(d: SessionDescription): JSONObject =
+        JSONObject().put("type", d.type.canonicalForm()).put("sdp", d.description)
+}
+
+// -------------------------------------------------------------------- SDP suspend helpers
+
+private open class SdpAdapter : SdpObserver {
+    override fun onCreateSuccess(desc: SessionDescription?) {}
+    override fun onSetSuccess() {}
+    override fun onCreateFailure(error: String?) {}
+    override fun onSetFailure(error: String?) {}
+}
+
+private suspend fun PeerConnection.createOfferSuspend(): SessionDescription =
+    suspendCancellableCoroutine { cont ->
+        createOffer(object : SdpAdapter() {
+            override fun onCreateSuccess(desc: SessionDescription?) {
+                if (desc != null) cont.resume(desc) else cont.resumeWithException(IllegalStateException("offer তৈরি হয়নি"))
+            }
+            override fun onCreateFailure(error: String?) {
+                cont.resumeWithException(IllegalStateException(error ?: "offer তৈরি ব্যর্থ"))
+            }
+        }, MediaConstraints())
+    }
+
+private suspend fun PeerConnection.createAnswerSuspend(): SessionDescription =
+    suspendCancellableCoroutine { cont ->
+        createAnswer(object : SdpAdapter() {
+            override fun onCreateSuccess(desc: SessionDescription?) {
+                if (desc != null) cont.resume(desc) else cont.resumeWithException(IllegalStateException("answer তৈরি হয়নি"))
+            }
+            override fun onCreateFailure(error: String?) {
+                cont.resumeWithException(IllegalStateException(error ?: "answer তৈরি ব্যর্থ"))
+            }
+        }, MediaConstraints())
+    }
+
+private suspend fun PeerConnection.setLocalSuspend(desc: SessionDescription) =
+    suspendCancellableCoroutine<Unit> { cont ->
+        setLocalDescription(object : SdpAdapter() {
+            override fun onSetSuccess() { cont.resume(Unit) }
+            override fun onSetFailure(error: String?) {
+                cont.resumeWithException(IllegalStateException(error ?: "local description ব্যর্থ"))
+            }
+        }, desc)
+    }
+
+private suspend fun PeerConnection.setRemoteSuspend(desc: SessionDescription) =
+    suspendCancellableCoroutine<Unit> { cont ->
+        setRemoteDescription(object : SdpAdapter() {
+            override fun onSetSuccess() { cont.resume(Unit) }
+            override fun onSetFailure(error: String?) {
+                cont.resumeWithException(IllegalStateException(error ?: "remote description ব্যর্থ"))
+            }
+        }, desc)
+    }
