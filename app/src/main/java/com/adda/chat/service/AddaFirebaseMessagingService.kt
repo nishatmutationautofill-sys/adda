@@ -2,6 +2,8 @@ package com.adda.chat.service
 
 import com.adda.chat.data.Session
 import com.adda.chat.util.Notifier
+import com.adda.chat.service.ConnectionService
+import kotlinx.coroutines.launch
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -21,6 +23,22 @@ class AddaFirebaseMessagingService : FirebaseMessagingService() {
         val type = data["type"].orEmpty()
         val title = message.notification?.title ?: data["title"] ?: "আড্ডা"
         val body = message.notification?.body ?: data["body"] ?: "আপনার নতুন আপডেট এসেছে"
+
+        // Incoming-call pushes are data-only. Wake/reconnect the app so the server can
+        // replay the stored WebRTC offer; CallManager then shows the native call notification.
+        if (type == "incoming_call") {
+            if (Session.hasToken) {
+                ConnectionService.start(applicationContext)
+                Session.scope.launch {
+                    repeat(15) {
+                        Session.ensureConnected()
+                        if (Session.socketConnected) return@launch
+                        kotlinx.coroutines.delay(1_000)
+                    }
+                }
+            }
+            return
+        }
 
         // Avoid duplicating the live Socket.IO message notification while app is open.
         if (Session.appInForeground) return

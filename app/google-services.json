@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "419558889740",
+    "project_id": "ghostmessenger-1bcaf",
+    "storage_bucket": "ghostmessenger-1bcaf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:419558889740:android:997b1e74c0d24d83125129",
+        "android_client_info": {
+          "package_name": "com.adda.chatkt"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDRNIhmD1YkWNgLgpdqzKkk2odgyNSLF7E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
