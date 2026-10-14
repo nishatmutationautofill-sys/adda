@@ -1,5 +1,8 @@
 package com.adda.chat.ui
 
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.journeyapps.barcodescanner.ScanContract
