@@ -2,9 +2,11 @@ package com.adda.chat.ui
 
 import android.app.DownloadManager
 import android.content.Intent
+import android.content.ContentValues
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Environment
+import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import org.json.JSONArray
@@ -15,6 +17,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +51,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
@@ -89,7 +94,11 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     val uid = Session.activeFriend ?: return
     val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
+    var secureMode by remember { mutableStateOf(false) }
+    var ttlSeconds by remember { mutableStateOf(3) }
     var viewerUrl by remember { mutableStateOf<String?>(null) }
+    var viewerSecure by remember { mutableStateOf(false) }
+    var selectedDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showEmojiPack by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -100,11 +109,11 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     BackHandler { Session.closeConversation() }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) Session.sendFile(uri)
+        if (uri != null) Session.sendFile(uri, secureMode, ttlSeconds)
     }
     val videoCapture = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            result.data?.data?.let { Session.sendFile(it) }
+            result.data?.data?.let { Session.sendFile(it, secureMode, ttlSeconds) }
                 ?: Toast.makeText(ctx, "ভিডিও পাওয়া যায়নি", Toast.LENGTH_SHORT).show()
         }
     }
@@ -139,7 +148,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 IconButton(onClick = { Session.closeConversation() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান")
                 }
-                Avatar(Session.displayName(uid), 40.dp, online = Session.online[uid] == true)
+                Avatar(Session.displayName(uid), 40.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                     Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
                     Text(
@@ -177,17 +186,43 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(Session.messages, key = { it.id }) { m ->
-                    MessageRow(m, mine = m.from == Session.me?.uid, onOpenImage = { viewerUrl = it }, onDownload = { downloadFile(ctx, it, m.fileName) })
+                    MessageRow(
+                        m,
+                        mine = m.from == Session.me?.uid,
+                        onOpenImage = { viewerUrl = it; viewerSecure = m.secure },
+                        onDownload = { downloadFile(ctx, it, m.fileName) },
+                        onDelete = { selectedDelete = m }
+                    )
                 }
             }
         }
 
-        // কম্পোজার
+        // কম্পোজার ও Secure Me
         Surface(color = Color.White) {
-            Row(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = secureMode, onCheckedChange = { secureMode = it })
+                    Text("Secure Me", fontWeight = FontWeight.SemiBold, color = if (secureMode) Color(0xFFB3261E) else Ink)
+                    Spacer(Modifier.weight(1f))
+                    if (secureMode) Text("স্বয়ংক্রিয় ডিলেট", color = Color(0xFFB3261E), fontSize = 12.sp)
+                }
+                if (secureMode) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${ttlSeconds}s", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
+                        Slider(
+                            value = ttlSeconds.toFloat(),
+                            onValueChange = { ttlSeconds = it.toInt().coerceIn(1, 60) },
+                            valueRange = 1f..60f,
+                            steps = 58,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("60s", color = Muted, fontSize = 11.sp)
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 0.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     IconButton(onClick = { picker.launch("*/*") }) {
                         Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল পাঠান", tint = Accent)
@@ -213,7 +248,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                             try { recorder?.release() } catch (_: Exception) { }
                             recorder = null
                             recording = false
-                            recordingFile?.let { Session.sendFile(Uri.fromFile(it)) }
+                            recordingFile?.let { Session.sendFile(Uri.fromFile(it), secureMode, ttlSeconds) }
                             recordingFile = null
                         } else {
                             requestCallPermission("audio") {
@@ -264,15 +299,28 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 IconButton(
                     onClick = {
                         val text = input.trim()
-                        if (text.isNotEmpty()) Session.sendText(text) { ok -> if (ok) input = "" }
+                        if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds) { ok -> if (ok) input = "" }
                     },
                     enabled = input.isNotBlank()
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "পাঠান",
                         tint = if (input.isNotBlank()) Accent else Muted)
                 }
+                }
             }
         }
+    }
+
+    selectedDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { selectedDelete = null },
+            title = { Text("মেসেজ/ফাইল ডিলেট করবেন?") },
+            text = { Text(if (target.from == Session.me?.uid) "এটি আপনার এবং অপর পক্ষের চ্যাট থেকে মুছে যাবে।" else "এটি শুধু আপনার চ্যাট থেকে মুছে যাবে।") },
+            confirmButton = {
+                TextButton(onClick = { selectedDelete = null; Session.deleteMessage(target) }) { Text("ডিলেট") }
+            },
+            dismissButton = { TextButton(onClick = { selectedDelete = null }) { Text("বাতিল") } }
+        )
     }
 
     if (showEmojiPack) {
@@ -315,7 +363,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     }
 
     viewerUrl?.let { url ->
-        ImageViewer(url = url, onClose = { viewerUrl = null }, onDownload = {
+        ImageViewer(url = url, onClose = { viewerUrl = null }, allowDownload = !viewerSecure, onDownload = {
             downloadFile(ctx, url, "adda_download")
         })
     }
@@ -324,10 +372,13 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
 private val timeFormat = SimpleDateFormat("hh:mm a", Locale("bn", "BD"))
 
 @Composable
-private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit) {
+private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     Column(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().combinedClickable(
+            onClick = {},
+            onLongClick = { if (mine) onDelete() }
+        ),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
         val shape = RoundedCornerShape(18.dp)
@@ -359,18 +410,24 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
             val isVideo = fileName.endsWith(".mp4", true) || fileName.endsWith(".webm", true) || fileName.endsWith(".3gp", true) || fileName.endsWith(".mov", true)
             Row(bubbleModifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).clickable {
-                    val mime = if (isAudio) "audio/*" else if (isVideo) "video/*" else "*/*"
-                    try {
-                        ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (_: Exception) { onDownload(url) }
+                    if (m.secure) {
+                        Toast.makeText(ctx, "সিকিউর ফাইল অ্যাপের বাইরে খোলা বা ডাউনলোড করা যাবে না", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val mime = if (isAudio) "audio/*" else if (isVideo) "video/*" else "*/*"
+                        try {
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } catch (_: Exception) { onDownload(url) }
+                    }
                 }.padding(end = 8.dp)) {
                     Text("${if (isAudio) "🎙️" else if (isVideo) "🎬" else "📎"} $fileName",
                         color = if (mine) Color.White else Accent, fontWeight = FontWeight.SemiBold)
                     if (m.size > 0) Text("%.2f MB".format(m.size / 1024.0 / 1024.0),
                         color = if (mine) Color.White.copy(alpha = 0.8f) else Muted, fontSize = 12.sp)
                 }
-                IconButton(onClick = { onDownload(url) }) {
-                    Icon(Icons.Filled.Download, contentDescription = "ডাউনলোড", tint = if (mine) Color.White else Accent)
+                if (!m.secure) {
+                    IconButton(onClick = { onDownload(url) }) {
+                        Icon(Icons.Filled.Download, contentDescription = "ডাউনলোড", tint = if (mine) Color.White else Accent)
+                    }
                 }
             }
         } else {
@@ -388,7 +445,7 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
 }
 
 @Composable
-private fun ImageViewer(url: String, onClose: () -> Unit, onDownload: () -> Unit) {
+private fun ImageViewer(url: String, onClose: () -> Unit, allowDownload: Boolean, onDownload: () -> Unit) {
     val ctx = LocalContext.current
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -404,11 +461,13 @@ private fun ImageViewer(url: String, onClose: () -> Unit, onDownload: () -> Unit
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White)
             }
-            Button(
-                onClick = onDownload,
-                shape = RoundedCornerShape(50),
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)
-            ) { Text("ডাউনলোড") }
+            if (allowDownload) {
+                Button(
+                    onClick = onDownload,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)
+                ) { Text("ডাউনলোড") }
+            }
         }
     }
 }
@@ -417,6 +476,28 @@ private fun ImageViewer(url: String, onClose: () -> Unit, onDownload: () -> Unit
 private fun downloadFile(ctx: android.content.Context, url: String, suggestedName: String?) {
     try {
         val uri = Uri.parse(url)
+        val cleanName = (suggestedName ?: uri.lastPathSegment ?: "adda_file").replace(Regex("[^A-Za-z0-9._ -]"), "_")
+        if (uri.scheme == "file") {
+            val source = File(uri.path ?: throw IllegalArgumentException("ফাইল পাওয়া যায়নি"))
+            if (!source.exists()) throw IllegalArgumentException("ফাইলের মেয়াদ শেষ হয়েছে")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, cleanName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val dest = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Downloads ফোল্ডার খোলা যায়নি")
+                ctx.contentResolver.openOutputStream(dest)?.use { output -> source.inputStream().use { it.copyTo(output) } }
+                    ?: throw IllegalStateException("ফাইল সংরক্ষণ করা যায়নি")
+            } else {
+                val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: ctx.cacheDir
+                val dest = File(dir, cleanName)
+                source.inputStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
+            }
+            Toast.makeText(ctx, "Downloads-এ ফাইল সংরক্ষণ হয়েছে", Toast.LENGTH_LONG).show()
+            return
+        }
         val request = DownloadManager.Request(uri)
             .setTitle(suggestedName ?: "Adda ফাইল")
             .setDescription("Adda থেকে ডাউনলোড হচ্ছে")
@@ -425,7 +506,6 @@ private fun downloadFile(ctx: android.content.Context, url: String, suggestedNam
             .setAllowedOverRoaming(false)
         if (Api.token.isNotBlank()) request.addRequestHeader("Authorization", "Bearer ${Api.token}")
         if (Api.isNgrok(Api.serverUrl)) request.addRequestHeader("ngrok-skip-browser-warning", "true")
-        val cleanName = (suggestedName ?: uri.lastPathSegment ?: "adda_file").replace(Regex("[^A-Za-z0-9._ -]"), "_")
         request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, cleanName)
         val manager = ctx.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
         manager.enqueue(request)

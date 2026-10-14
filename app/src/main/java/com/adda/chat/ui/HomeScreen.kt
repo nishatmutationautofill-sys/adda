@@ -1,5 +1,7 @@
 package com.adda.chat.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +56,10 @@ import com.adda.chat.data.Session
 fun HomeScreen() {
     val me = Session.me ?: return
     val clipboard = LocalClipboardManager.current
+    var showDiscoverable by remember { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) Session.uploadProfilePhoto(uri)
+    }
     var menuOpen by remember { mutableStateOf(false) }
     var friendUid by remember { mutableStateOf("") }
     var friendSearch by remember { mutableStateOf("") }
@@ -103,7 +111,7 @@ fun HomeScreen() {
             item {
                 Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(me.username, 52.dp)
+                        Avatar(me.username, 52.dp, photoUrl = me.profilePhoto)
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(me.username, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
@@ -113,6 +121,31 @@ fun HomeScreen() {
                             clipboard.setText(AnnotatedString(me.uid))
                             Session.toast("আপনার আইডি কপি হয়েছে")
                         }) { Icon(Icons.Filled.ContentCopy, contentDescription = "আইডি কপি", tint = Accent) }
+                    }
+                }
+            }
+
+            // প্রোফাইল, ছবি এবং পাবলিক বন্ধু-চাই সেটিং
+            item {
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("প্রোফাইল ও বন্ধু খোঁজা", fontWeight = FontWeight.SemiBold, color = Ink)
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { photoPicker.launch("image/*") }, modifier = Modifier.weight(1f)) {
+                                Text("প্রোফাইল ছবি সেট করুন")
+                            }
+                            Button(onClick = { Session.setDiscoverable(!me.discoverable) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
+                                Text(if (me.discoverable) "বন্ধু চাই: চালু" else "বন্ধু চাই")
+                            }
+                        }
+                        OutlinedButton(onClick = { Session.refreshDiscoverableUsers(); showDiscoverable = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("সবার বন্ধু-চাই আইডি দেখুন")
+                        }
+                        Text(
+                            if (me.discoverable) "আপনার আইডি ও নাম পাবলিক তালিকায় দেখা যাচ্ছে।" else "‘বন্ধু চাই’ চালু করলে অন্যরা আপনার আইডি দেখতে ও রিকুয়েস্ট পাঠাতে পারবে।",
+                            color = Muted, fontSize = 12.sp
+                        )
                     }
                 }
             }
@@ -190,7 +223,7 @@ fun HomeScreen() {
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { Session.openConversation(uid) }
                 ) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(Session.displayName(uid), 48.dp, online = Session.online[uid] == true)
+                        Avatar(Session.displayName(uid), 48.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(Session.displayName(uid), fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Ink)
@@ -211,5 +244,35 @@ fun HomeScreen() {
             }
             item { Spacer(Modifier.navigationBarsPadding().height(8.dp)) }
         }
+    }
+
+    if (showDiscoverable) {
+        AlertDialog(
+            onDismissRequest = { showDiscoverable = false },
+            title = { Text("যারা বন্ধু চাইছেন") },
+            text = {
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.fillMaxWidth().height(320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (Session.discoverableUsers.isEmpty()) {
+                        item { Text("এখনো কেউ ‘বন্ধু চাই’ চালু করেননি।", color = Muted) }
+                    }
+                    items(Session.discoverableUsers, key = { "discover_${it.uid}" }) { person ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(person.username, 42.dp, photoUrl = person.profilePhoto)
+                            Spacer(Modifier.size(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(person.username, fontWeight = FontWeight.SemiBold, color = Ink)
+                                Text(person.uid, fontSize = 12.sp, color = Muted)
+                            }
+                            Button(onClick = { Session.sendFriendRequest(person.uid) {}; }, shape = RoundedCornerShape(50)) { Text("রিকুয়েস্ট") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { Session.refreshDiscoverableUsers() }) { Text("রিফ্রেশ") } },
+            dismissButton = { TextButton(onClick = { showDiscoverable = false }) { Text("বন্ধ") } }
+        )
     }
 }

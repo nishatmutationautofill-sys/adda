@@ -68,7 +68,7 @@ Media sending depends on the current server's `/api/messages/file` endpoint and 
 Firebase Console → Project settings → Your apps → Add app (Android) থেকে একই Firebase project `ghostmessenger-1bcaf`-এ `com.adda.chatkt` প্যাকেজের Android app নিবন্ধন করুন, তারপর সেই অ্যাপের `google-services.json` ডাউনলোড করে `app/google-services.json`-এ রাখুন। এতে Google Services Gradle plugin স্বয়ংক্রিয়ভাবে চালু হবে। ফাইলটি না থাকলে প্রজেক্ট কম্পাইল হতে পারে, কিন্তু FCM কার্যকর হবে না।
 
 ### 2) সার্ভার সেটআপ
-`server-fcm.js`-এর কোড বর্তমান `server.js`-এর জায়গায় ব্যবহার করুন (আগে ব্যাকআপ নিন)। সার্ভার ফোল্ডারে চালান:
+`server.js`-এর সর্বশেষ root ফাইলটিই ব্যবহার করুন (আগে পুরোনো ফাইলের ব্যাকআপ নিন)। এতে FCM message push ও incoming-call signaling যুক্ত আছে। সার্ভার ফোল্ডারে চালান:
 
 ```bash
 npm install express socket.io multer cors bcryptjs jsonwebtoken firebase-admin
@@ -100,3 +100,33 @@ node server.js
 - Android 13+ এ নোটিফিকেশন অনুমতি চালু থাকতে হবে।
 - Force Stop অবস্থায় Android সাধারণত push/ব্যাকগ্রাউন্ড কার্যক্রম স্থগিত রাখে; ব্যবহারকারী আবার অ্যাপ চালু না করা পর্যন্ত নিশ্চয়তা নেই।
 - এই সংযোজন মেসেজ ও ফ্রেন্ড রিকুয়েস্টের push কভার করে; WebRTC কলের FCM invite/signaling এতে অন্তর্ভুক্ত নয়।
+
+## Latest social/profile features
+- Long-press a sent or received message/file to delete it. Sender deletion removes it for both participants; recipient deletion hides it only for that recipient.
+- Use **বন্ধু চাই** to opt into the public discovery list; users in that list can receive friend requests.
+- Set a profile image from the home screen; images are limited to 5 MB.
+- Android screenshots and screen recording are blocked inside the app window using `FLAG_SECURE` (external cameras cannot be blocked).
+- The server file at the project root is `server.js`; configure Firebase Admin service-account credentials before enabling FCM.
+
+
+## End-to-End Encryption (Android ↔ Android) এবং Secure Me
+
+এই সংস্করণে নতুন Android ক্লায়েন্টের টেক্সট মেসেজ এবং অ্যাটাচমেন্টের কনটেন্ট **ডিভাইসে এনক্রিপ্ট** হয়:
+- AES-256-GCM দিয়ে মেসেজ/ফাইলের কনটেন্ট এনক্রিপ্ট করা হয়।
+- AES key প্রেরক ও প্রাপকের Android Keystore RSA-OAEP public key দিয়ে আলাদাভাবে wrap করা হয়।
+- RSA private key Android Keystore-এ থাকে; সার্ভারে পাঠানো হয় না।
+- সার্ভার `text` ciphertext, encrypted file bytes এবং wrapped-key envelope রাখে। FCM নোটিফিকেশনে মেসেজের লেখা/ফাইলের নাম পাঠানো হয় না।
+- প্রথমবার বন্ধুর public key পেলে সেটি local SharedPreferences-এ pin করা হয়; পরে key বদলে গেলে অ্যাপ মেসেজ পাঠানো বন্ধ করে সতর্ক করে (trust-on-first-use; প্রথমবার fingerprint আলাদা মাধ্যমে যাচাই করাই নিরাপদ)।
+- Secure Me checkbox চালু থাকলে ১–৬০ সেকেন্ড বেছে নেওয়া যায়; ডিফল্ট ৩ সেকেন্ড। প্রাপকের Android অ্যাপে কনটেন্ট decrypt/display হওয়ার পর timer শুরু হয়। সময় শেষে দুই পক্ষের UI থেকে সরানো হয় এবং সার্ভারের সংরক্ষিত রেকর্ড/এনক্রিপ্টেড ফাইল মুছে ফেলা হয়। না-খোলা Secure Me কনটেন্ট সার্ভার থেকে সর্বোচ্চ ২৪ ঘণ্টা পরে fallback cleanup হয়।
+- অ্যাপ উইন্ডোতে `FLAG_SECURE` চালু; Secure Me ফাইলের ডাউনলোড বাটন/বাইরের অ্যাপে খোলা বন্ধ করা হয়েছে।
+
+### সার্ভার আপডেট
+প্রজেক্টের root-এ থাকা **`server.js`**-ই ব্যবহার করুন। এতে E2EE public-key API, encrypted upload, Secure Me expiry এবং আগের FCM incoming-call offer/candidate replay—সব একত্র করা আছে। পুরোনো সার্ভারের ব্যাকআপ নিয়ে এই `server.js` deploy করুন; `server-package.json`-এর dependency install করুন এবং Firebase Admin service-account environment variables আগের মতো সেট রাখুন।
+
+### গুরুত্বপূর্ণ সীমাবদ্ধতা
+- E2EE-এর জন্য দুই পক্ষকেই এই Android সংস্করণ ব্যবহার করতে হবে এবং উভয়ের public key নিবন্ধিত থাকতে হবে। Web/Electron-এর পুরোনো plaintext ক্লায়েন্ট এই encrypted Android মেসেজ পড়তে পারবে না; ওই ক্লায়েন্ট থেকে পাঠানো পুরোনো/নতুন plaintext মেসেজ E2EE হবে না।
+- পুরোনো `messages.json`-এর মেসেজ স্বয়ংক্রিয়ভাবে এনক্রিপ্ট হয় না। নতুন Android মেসেজই ডিভাইস থেকে এনক্রিপ্ট হয়ে যায়।
+- সার্ভার এখনও routing-এর জন্য প্রেরক/প্রাপক ID, message ID, সময়, secure timer, file size/URL এবং online/friend metadata দেখতে পারে। Username, public profile photo ও friend/discovery তথ্যও এই পরিবর্তনে E2EE করা হয়নি।
+- এই সংস্করণে প্রতি অ্যাকাউন্টে এক Android keypair ধরে নেওয়া হয়েছে। অ্যাপ ডেটা মুছে ফেললে/অ্যাপ আনইনস্টল করলে private key হারিয়ে পুরোনো encrypted মেসেজ আর খোলা যাবে না। Key recovery বা multi-device key sync নেই।
+- Secure Me screenshot/recording প্রতিরোধ Android-এর স্বাভাবিক capture path-এ কাজ করে; অন্য ফোনের ক্যামেরা, rooted/compromised device, modified OS বা receiver নিজে কনটেন্ট কপি করা শতভাগ আটকানো যায় না।
+- এই পরিবর্তনের জন্য Kotlin/Gradle source staticভাবে পর্যালোচনা করা হয়েছে; এখানে Android APK build ও দুইটি বাস্তব ফোনে end-to-end test চালানো সম্ভব হয়নি। Deploy করার আগে Android Studio/GitHub Actions-এ build করে দুইটি Android account দিয়ে test করুন।

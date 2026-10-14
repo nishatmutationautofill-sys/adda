@@ -42,7 +42,7 @@ object Api {
 
     /** সম্পূর্ণ ফাইল URL (সার্ভার-রিলেটিভ হলে সার্ভারের ঠিকানা জুড়ে দেয়) */
     fun absoluteUrl(path: String): String =
-        if (path.startsWith("http://") || path.startsWith("https://")) path else serverUrl + path
+        if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("file://")) path else serverUrl + path
 
     private fun Request.Builder.withCommonHeaders(): Request.Builder {
         if (token.isNotEmpty()) header("Authorization", "Bearer $token")
@@ -80,6 +80,22 @@ object Api {
             throw ApiException("সার্ভারে পৌঁছানো যাচ্ছে না — সার্ভার চালু আছে কিনা দেখুন", 0)
         } catch (e: IllegalArgumentException) {
             throw ApiException("সার্ভারের লিংকটি সঠিক নয়: $serverUrl", 0)
+        }
+    }
+
+
+    suspend fun downloadBytes(pathOrUrl: String): ByteArray = withContext(Dispatchers.IO) {
+        val url = if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) pathOrUrl else serverUrl + pathOrUrl
+        val builder = Request.Builder().url(url).withCommonHeaders().get()
+        try {
+            client.newCall(builder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) throw ApiException("ফাইল ডাউনলোড ব্যর্থ (${resp.code})", resp.code)
+                resp.body?.bytes() ?: throw ApiException("ফাইল খালি", 0)
+            }
+        } catch (e: ApiException) {
+            throw e
+        } catch (e: IOException) {
+            throw ApiException("ফাইল ডাউনলোড করা যায়নি", 0)
         }
     }
 

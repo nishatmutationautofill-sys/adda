@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import com.adda.chat.call.CallManager
 import com.google.firebase.messaging.FirebaseMessaging
 import com.adda.chat.service.ConnectionService
+import com.adda.chat.security.E2ee
 import com.adda.chat.util.FileUpload
 import com.adda.chat.util.Notifier
 import io.socket.client.Ack
@@ -26,6 +27,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import okio.Buffer
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,13 +55,16 @@ object Session {
     var startTick by mutableStateOf(0)
 
     val names = mutableStateMapOf<String, String>()
+    val profilePhotos = mutableStateMapOf<String, String>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
     val messages = mutableStateListOf<ChatMessage>()
+    val discoverableUsers = mutableStateListOf<DiscoverableUser>()
 
     @Volatile var appInForeground = false
 
     private val seenIds = HashSet<String>()
+    private val pendingSecureExpiries = HashMap<String, Long>()
     private var socket: Socket? = null
     private var restoring = false
     private var toastCounter = 0
@@ -64,6 +72,8 @@ object Session {
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("adda", Context.MODE_PRIVATE)
+        // Remove decrypted media cache left by a prior process; ciphertext remains on server.
+        appContext.cacheDir.listFiles()?.filter { it.name.startsWith("e2ee_") }?.forEach { it.delete() }
         Api.token = prefs.getString("messengerToken", "").orEmpty()
         hasToken = Api.token.isNotEmpty()
         Notifier.init(appContext)
@@ -127,6 +137,12 @@ object Session {
     }
 
     private suspend fun enterMessenger() {
+        // Register only the public key. The RSA private key remains in Android Keystore.
+        try {
+            Api.postObj("/api/e2ee/public-key", JSONObject().put("publicKey", E2ee.publicKeyBase64()))
+        } catch (e: Exception) {
+            toast("E2EE কী সার্ভারে নিবন্ধন হয়নি: ${e.message}")
+        }
         ConnectionService.start(appContext)
         refreshPeople()
         connectSocket()
@@ -224,7 +240,9 @@ object Session {
         activeFriend = null
         messages.clear()
         seenIds.clear()
+        pendingSecureExpiries.clear()
         names.clear()
+        profilePhotos.clear()
         online.clear()
         unread.clear()
     }
@@ -246,6 +264,7 @@ object Session {
                     try {
                         val p = Api.getObj("/api/users/${Uri.encode(uid)}")
                         names[uid] = p.optString("username", uid).ifEmpty { uid }
+                        p.optString("profilePhoto").takeIf { it.isNotBlank() && it != "null" }?.let { profilePhotos[uid] = it }
                     } catch (_: Exception) {
                     }
                 }
@@ -264,6 +283,65 @@ object Session {
             } catch (e: Api.ApiException) {
                 toast(e.message)
             }
+        }
+    }
+
+    fun setDiscoverable(enabled: Boolean) {
+        scope.launch {
+            try {
+                Api.postObj("/api/discoverable", JSONObject().put("enabled", enabled))
+                me = me?.copy(discoverable = enabled)
+                if (enabled) refreshDiscoverableUsers()
+                toast(if (enabled) "আপনার আইডি এখন সবাই দেখতে পারবে" else "আপনার আইডি আর পাবলিক তালিকায় নেই")
+            } catch (e: Api.ApiException) { toast(e.message) }
+        }
+    }
+
+    fun refreshDiscoverableUsers() {
+        scope.launch {
+            try {
+                val arr = Api.getArr("/api/discoverable")
+                val list = mutableListOf<DiscoverableUser>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    list += DiscoverableUser(o.optString("uid"), o.optString("username"), o.optString("profilePhoto").takeIf { it.isNotBlank() && it != "null" })
+                }
+                discoverableUsers.clear(); discoverableUsers.addAll(list.filter { it.uid != me?.uid })
+                list.forEach {
+                    names[it.uid] = it.username
+                    it.profilePhoto?.let { photo -> profilePhotos[it.uid] = photo }
+                }
+            } catch (e: Api.ApiException) { toast(e.message) }
+        }
+    }
+
+    fun uploadProfilePhoto(uri: Uri) {
+        scope.launch {
+            try {
+                val prepared = withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
+                if (!prepared.name.substringAfterLast('.', "").lowercase().let { it in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif") }) {
+                    toast("একটি ছবি নির্বাচন করুন"); return@launch
+                }
+                if (prepared.size > 5L * 1024 * 1024) { toast("ছবির আকার ৫ MB-এর মধ্যে হতে হবে"); return@launch }
+                val form = MultipartBody.Builder().setType(MultipartBody.FORM)
+                    .addFormDataPart("file", prepared.name, prepared.body).build()
+                val result = JSONObject(Api.request("POST", "/api/profile-photo", body = form))
+                me = me?.copy(profilePhoto = result.optString("profilePhoto"))
+                me?.let { profilePhotos[it.uid] = result.optString("profilePhoto") }
+                toast("প্রোফাইল ছবি আপডেট হয়েছে")
+                refreshDiscoverableUsers()
+            } catch (e: Exception) { toast(e.message ?: "প্রোফাইল ছবি আপলোড হয়নি") }
+        }
+    }
+
+    fun deleteMessage(message: ChatMessage) {
+        scope.launch {
+            try {
+                Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}")
+                messages.firstOrNull { it.id == message.id }?.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } } }
+                messages.removeAll { it.id == message.id }
+                toast("মেসেজ/ফাইল ডিলেট হয়েছে")
+            } catch (e: Api.ApiException) { toast(e.message) }
         }
     }
 
@@ -290,7 +368,12 @@ object Session {
             try {
                 val arr: JSONArray = Api.getArr("/api/messages/${Uri.encode(uid)}")
                 if (activeFriend != uid) return@launch
-                for (i in 0 until arr.length()) addMessage(parseMessage(arr.getJSONObject(i)))
+                for (i in 0 until arr.length()) {
+                    val raw = parseMessage(arr.getJSONObject(i))
+                    try { addMessage(hydrateMessage(raw)) } catch (e: Exception) {
+                        toast("এনক্রিপ্টেড মেসেজ খোলা যায়নি: ${e.message}")
+                    }
+                }
                 messages.sortBy { it.date }
             } catch (e: Api.ApiException) {
                 toast(e.message)
@@ -305,20 +388,75 @@ object Session {
         seenIds.clear()
     }
 
+    private suspend fun hydrateMessage(raw: ChatMessage): ChatMessage {
+        val myUid = me?.uid ?: throw IllegalStateException("লগইন সেশন নেই")
+        if (raw.isFile && raw.encrypted) {
+            val envelope = raw.envelope ?: throw IllegalStateException("ফাইলের এনক্রিপশন তথ্য নেই")
+            val cipherBytes = Api.downloadBytes(raw.fileUrl ?: throw IllegalStateException("ফাইল URL নেই"))
+            val decoded = withContext(Dispatchers.Default) { E2ee.decryptFile(cipherBytes, envelope, myUid) }
+            val safeName = decoded.fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100).ifBlank { "adda_file" }
+            val local = File(appContext.cacheDir, "e2ee_${raw.id}_$safeName")
+            withContext(Dispatchers.IO) { local.writeBytes(decoded.bytes) }
+            return raw.copy(
+                fileUrl = "file://${local.absolutePath}",
+                fileName = decoded.fileName,
+                size = decoded.bytes.size.toLong(),
+                encrypted = false
+            )
+        }
+        if (raw.type == "text" && raw.text.startsWith("{") && raw.text.contains("\"_e2ee\"")) {
+            val clear = E2ee.decryptText(raw.text, myUid)
+            val payload = JSONObject(clear)
+            return raw.copy(text = payload.optString("text"))
+        }
+        return raw
+    }
+
     private fun addMessage(m: ChatMessage) {
         val myUid = me?.uid ?: return
         val active = activeFriend ?: return
         if (m.id.isEmpty() || seenIds.contains(m.id)) return
         if (m.from != myUid && m.from != active) return
         if (m.to != myUid && m.to != active) return
-        seenIds.add(m.id)
-        messages.add(m)
+        if (m.secure && m.expiresAt > 0 && m.expiresAt <= System.currentTimeMillis()) {
+            m.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> File(p).delete() } }
+            return
+        }
+        // The timer starts only when the recipient's Android client has decrypted and displayed it.
+        val rememberedExpiry = pendingSecureExpiries.remove(m.id) ?: 0L
+        val withServerExpiry = if (m.expiresAt == 0L && rememberedExpiry > 0L) m.copy(expiresAt = rememberedExpiry) else m
+        val shown = if (withServerExpiry.secure && withServerExpiry.expiresAt == 0L && withServerExpiry.to == myUid) {
+            withServerExpiry.copy(expiresAt = System.currentTimeMillis() + withServerExpiry.ttlSeconds.coerceIn(1, 60) * 1000L)
+        } else withServerExpiry
+        seenIds.add(shown.id)
+        messages.add(shown)
+        if (shown.secure && shown.expiresAt > 0) scheduleSecureExpiry(shown)
+        if (shown.secure && shown.to == myUid && m.expiresAt == 0L) {
+            socket?.emit("secure:opened", JSONObject().put("id", shown.id))
+        }
+    }
+
+    private fun scheduleSecureExpiry(m: ChatMessage) {
+        scope.launch {
+            delay((m.expiresAt - System.currentTimeMillis()).coerceAtLeast(0L))
+            messages.removeAll { it.id == m.id }
+            seenIds.remove(m.id)
+            m.fileUrl?.takeIf { it.startsWith("file:") }?.let { uri ->
+                Uri.parse(uri).path?.let { withContext(Dispatchers.IO) { File(it).delete() } }
+            }
+        }
     }
 
     private fun onChatMessage(m: ChatMessage) {
         val myUid = me?.uid ?: return
         val active = activeFriend
-        val preview = if (m.isFile) "📎 ${m.fileName ?: "ফাইল"}" else m.text
+        val preview = when {
+            m.secure -> "🔒 সিকিউর মেসেজ এসেছে"
+            m.encrypted || m.text.contains("\"_e2ee\"") -> "🔐 নতুন এনক্রিপ্টেড মেসেজ"
+            m.isFile && m.encrypted -> "🔐 এনক্রিপ্টেড ফাইল এসেছে"
+            m.isFile -> "📎 ${m.fileName ?: "ফাইল"}"
+            else -> m.text
+        }
         if (active != null && (m.from == active || m.to == active)) {
             addMessage(m)
             if (m.from != myUid && !appInForeground) {
@@ -331,7 +469,20 @@ object Session {
         }
     }
 
-    fun sendText(text: String, onDone: (success: Boolean) -> Unit) {
+    private suspend fun peerE2eePublicKey(uid: String): String {
+        val remote = Api.getObj("/api/e2ee/public-key/${Uri.encode(uid)}").getString("publicKey")
+        val pinName = "e2ee_peer_key_$uid"
+        val pinned = prefs.getString(pinName, null)
+        if (pinned == null) {
+            // Trust-on-first-use pin: later key substitution is rejected.
+            prefs.edit().putString(pinName, remote).apply()
+        } else if (pinned != remote) {
+            throw SecurityException("এই বন্ধুর E2EE কী বদলে গেছে। নিরাপত্তার জন্য মেসেজ পাঠানো বন্ধ করা হয়েছে; পরিচয় যাচাই করুন।")
+        }
+        return remote
+    }
+
+    fun sendText(text: String, secure: Boolean = false, ttlSeconds: Int = 3, onDone: (success: Boolean) -> Unit) {
         val to = activeFriend ?: return
         val s = socket
         if (s == null || !socketConnected) {
@@ -339,37 +490,69 @@ object Session {
             onDone(false)
             return
         }
-        s.emit("chat:send", JSONObject().put("to", to).put("text", text), Ack { args ->
-            val err = (args.firstOrNull() as? JSONObject)?.optString("error").orEmpty()
-            scope.launch {
-                if (err.isNotEmpty()) toast(err)
-                onDone(err.isEmpty())
+        scope.launch {
+            try {
+                val peer = peerE2eePublicKey(to)
+                val payload = JSONObject().put("text", text).toString()
+                val encrypted = E2ee.encryptText(payload, me?.uid ?: throw IllegalStateException("লগইন নেই"), to, peer)
+                val data = JSONObject()
+                    .put("to", to)
+                    .put("text", encrypted)
+                    .put("secure", secure)
+                    .put("ttlSeconds", ttlSeconds.coerceIn(1, 60))
+                s.emit("chat:send", data, Ack { args ->
+                    val err = (args.firstOrNull() as? JSONObject)?.optString("error").orEmpty()
+                    scope.launch {
+                        if (err.isNotEmpty()) toast(err)
+                        onDone(err.isEmpty())
+                    }
+                })
+            } catch (e: Exception) {
+                toast("এনক্রিপ্টেড মেসেজ পাঠানো যায়নি: ${e.message}")
+                onDone(false)
             }
-        })
+        }
     }
 
-    fun sendFile(uri: Uri) {
+    fun sendFile(uri: Uri, secure: Boolean = false, ttlSeconds: Int = 3) {
         val to = activeFriend ?: run {
             toast("ফাইল পাঠাতে আগে একজন বন্ধুকে নির্বাচন করুন")
             return
         }
         scope.launch {
             try {
-                toast("ফাইল প্রস্তুত হচ্ছে…")
+                toast("ফাইল এনক্রিপ্ট হচ্ছে…")
                 val prepared = withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
+                if (prepared.size > 50L * 1024 * 1024) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
+                val buffer = Buffer()
+                withContext(Dispatchers.IO) { prepared.body.writeTo(buffer) }
+                val plainBytes = buffer.readByteArray()
+                if (plainBytes.size > 50L * 1024 * 1024 - 16) throw IllegalArgumentException("এনক্রিপশনসহ ফাইলটি ৫০ MB ছাড়িয়ে যাচ্ছে")
+                val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
+                val peer = peerE2eePublicKey(to)
+                val senderUid = me?.uid ?: throw IllegalStateException("লগইন নেই")
+                val encrypted = withContext(Dispatchers.Default) {
+                    E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime)
+                }
+                val encryptedBody = encrypted.bytes.toRequestBody("application/octet-stream".toMediaType())
                 val form = MultipartBody.Builder().setType(MultipartBody.FORM)
-                    .addFormDataPart("file", prepared.name, prepared.body)
+                    .addFormDataPart("file", "encrypted.bin", encryptedBody)
                     .addFormDataPart("to", to)
+                    .addFormDataPart("encrypted", "true")
+                    .addFormDataPart("envelope", encrypted.envelope)
+                    .addFormDataPart("secure", secure.toString())
+                    .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
                     .build()
                 val resp = Api.request("POST", "/api/messages/file", body = form)
-                addMessage(parseMessage(JSONObject(resp)))
-                toast(if (prepared.compressed) "ছবি কমপ্রেস করে পাঠানো হয়েছে" else "ফাইল পাঠানো হয়েছে")
+                val raw = parseMessage(JSONObject(resp))
+                addMessage(hydrateMessage(raw))
+                toast(if (secure) "সিকিউর ফাইল পাঠানো হয়েছে" else "এনক্রিপ্টেড ফাইল পাঠানো হয়েছে")
             } catch (e: Api.ApiException) {
                 toast(e.message)
             } catch (e: IllegalArgumentException) {
                 toast(e.message)
             } catch (e: Exception) {
-                toast("ফাইল পাঠানো যায়নি: ${e.message}")
+                toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}")
             }
         }
     }
@@ -422,7 +605,40 @@ object Session {
             }
         }
         s.on("chat:message") { args ->
-            (args.firstOrNull() as? JSONObject)?.let { o -> scope.launch { onChatMessage(parseMessage(o)) } }
+            (args.firstOrNull() as? JSONObject)?.let { o -> scope.launch {
+                val raw = parseMessage(o)
+                try {
+                    val active = activeFriend
+                    val relevant = active != null && (raw.from == active || raw.to == active)
+                    onChatMessage(if (relevant) hydrateMessage(raw) else raw)
+                } catch (e: Exception) {
+                    toast("এনক্রিপ্টেড মেসেজ খোলা যায়নি: ${e.message}")
+                }
+            } }
+        }
+        s.on("chat:deleted") { args ->
+            val id = (args.firstOrNull() as? JSONObject)?.optString("id").orEmpty()
+            scope.launch {
+                messages.firstOrNull { it.id == id }?.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } } }
+                messages.removeAll { it.id == id }
+            }
+        }
+        s.on("chat:expire") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            val id = o?.optString("id").orEmpty()
+            val expiresAt = o?.optLong("expiresAt", 0L) ?: 0L
+            scope.launch {
+                val index = messages.indexOfFirst { it.id == id }
+                if (expiresAt > 0L) {
+                    if (index >= 0) {
+                        val updated = messages[index].copy(expiresAt = expiresAt)
+                        messages[index] = updated
+                        scheduleSecureExpiry(updated)
+                    } else {
+                        pendingSecureExpiries[id] = expiresAt
+                    }
+                }
+            }
         }
         s.on("friend:request") { args ->
             val o = args.firstOrNull() as? JSONObject

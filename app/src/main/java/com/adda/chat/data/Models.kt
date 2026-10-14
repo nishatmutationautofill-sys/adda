@@ -10,8 +10,12 @@ data class Me(
     val uid: String,
     val username: String,
     val friends: List<String>,
-    val requests: List<String>
+    val requests: List<String>,
+    val discoverable: Boolean = false,
+    val profilePhoto: String? = null
 )
+
+data class DiscoverableUser(val uid: String, val username: String, val profilePhoto: String?)
 
 data class ChatMessage(
     val id: String,
@@ -22,7 +26,12 @@ data class ChatMessage(
     val fileUrl: String?,
     val fileName: String?,
     val size: Long,
-    val date: Long
+    val date: Long,
+    val encrypted: Boolean = false,
+    val envelope: String? = null,
+    val secure: Boolean = false,
+    val ttlSeconds: Int = 0,
+    val expiresAt: Long = 0L
 ) {
     val isFile: Boolean get() = type == "file" && !fileUrl.isNullOrEmpty()
     val isImage: Boolean
@@ -55,7 +64,9 @@ fun parseMe(o: JSONObject): Me = Me(
     uid = o.optString("uid"),
     username = o.optString("username"),
     friends = o.optJSONArray("friends").toStringList(),
-    requests = o.optJSONArray("friendRequests").toStringList()
+    requests = o.optJSONArray("friendRequests").toStringList(),
+    discoverable = o.optBoolean("discoverable", false),
+    profilePhoto = if (o.isNull("profilePhoto")) null else o.optString("profilePhoto").takeIf { it.isNotBlank() }
 )
 
 fun parseMessage(o: JSONObject): ChatMessage = ChatMessage(
@@ -67,7 +78,12 @@ fun parseMessage(o: JSONObject): ChatMessage = ChatMessage(
     fileUrl = o.strOrNull("fileUrl"),
     fileName = o.strOrNull("fileName"),
     size = o.optLong("size", 0L),
-    date = parseDate(o.opt("date"))
+    date = parseDate(o.opt("date")),
+    encrypted = o.optBoolean("encrypted", false),
+    envelope = if (o.isNull("envelope")) null else o.optString("envelope").takeIf { it.isNotBlank() && it != "null" },
+    secure = o.optBoolean("secure", false),
+    ttlSeconds = o.optInt("ttlSeconds", 0),
+    expiresAt = if (o.isNull("expiresAt")) 0L else parseDate(o.opt("expiresAt"))
 )
 
 private fun parseDate(v: Any?): Long {
@@ -79,7 +95,7 @@ private fun parseDate(v: Any?): Long {
 }
 
 private fun parseIso(s: String): Long {
-    for (pattern in listOf("yyyy-MM-ddTHH:mm:ss.SSSXXX", "yyyy-MM-ddTHH:mm:ssXXX")) {
+    for (pattern in listOf("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", "yyyy-MM-dd'T'HH:mm:ssXXX")) {
         try {
             val f = SimpleDateFormat(pattern, Locale.US)
             f.timeZone = TimeZone.getTimeZone("UTC")

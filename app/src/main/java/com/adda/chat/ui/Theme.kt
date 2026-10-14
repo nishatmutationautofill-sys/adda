@@ -20,6 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
+import com.adda.chat.data.Api
 
 val Accent = Color(0xFF4D4FE8)
 val AccentLight = Color(0xFF3F8CFF)
@@ -48,18 +52,27 @@ fun AddaTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun Avatar(name: String, size: Dp = 44.dp, online: Boolean = false, modifier: Modifier = Modifier) {
+fun Avatar(name: String, size: Dp = 44.dp, online: Boolean = false, modifier: Modifier = Modifier, photoUrl: String? = null) {
     Box(modifier = modifier.size(size)) {
         Box(
             modifier = Modifier.size(size).clip(CircleShape).background(BubbleBrush),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = name.take(1).uppercase(),
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = (size.value * 0.4f).sp
-            )
+            if (!photoUrl.isNullOrBlank()) {
+                val ctx = LocalContext.current
+                AsyncImage(
+                    model = ImageRequest.Builder(ctx).data(Api.absoluteUrl(photoUrl)).crossfade(true).build(),
+                    contentDescription = "$name প্রোফাইল ছবি",
+                    modifier = Modifier.size(size).clip(CircleShape)
+                )
+            } else {
+                Text(
+                    text = name.take(1).uppercase(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (size.value * 0.4f).sp
+                )
+            }
         }
         if (online) {
             Box(
