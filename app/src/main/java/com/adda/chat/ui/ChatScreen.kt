@@ -372,7 +372,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
 
 private val timeFormat = SimpleDateFormat("hh:mm a", Locale("bn", "BD"))
 
-@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     Column(
