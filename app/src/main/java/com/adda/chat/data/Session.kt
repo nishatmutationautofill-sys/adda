@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.adda.chat.call.CallManager
+import com.google.firebase.messaging.FirebaseMessaging
 import com.adda.chat.service.ConnectionService
 import com.adda.chat.util.FileUpload
 import com.adda.chat.util.Notifier
@@ -129,6 +130,29 @@ object Session {
         ConnectionService.start(appContext)
         refreshPeople()
         connectSocket()
+        refreshFcmToken()
+    }
+
+    /** Firebase token refresh/register. The server stores it against the authenticated account. */
+    fun refreshFcmToken() {
+        if (Api.token.isEmpty() || Api.serverUrl.isEmpty()) return
+        try {
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token -> registerPushToken(token) }
+        } catch (_: Exception) {
+            // A matching google-services.json is required for FCM.
+        }
+    }
+
+    fun registerPushToken(token: String) {
+        if (token.isBlank() || Api.token.isEmpty() || Api.serverUrl.isEmpty()) return
+        scope.launch {
+            try {
+                Api.postObj("/api/push-token", JSONObject().put("token", token))
+            } catch (_: Exception) {
+                // Next login/token refresh retries registration.
+            }
+        }
     }
 
     /** নেট ফিরলে বা সার্ভিস জাগলে: সকেট বিচ্ছিন্ন থাকলে সাথে সাথে আবার যুক্ত করে */

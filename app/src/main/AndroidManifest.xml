@@ -63,6 +63,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Firebase Cloud Messaging: background push messages -->
+        <service
+            android:name=".service.AddaFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- নোটিফিকেশন থেকে কল রিজেক্ট -->
         <receiver
             android:name=".service.CallActionReceiver"

@@ -57,3 +57,46 @@ HTML/WebView নয় — পুরোপুরি নেটিভ Kotlin অ�
 - Emoji pack JSON schema: `{ "name": "My pack", "version": 1, "emojis": ["😀", "❤️"] }`.
 
 Media sending depends on the current server's `/api/messages/file` endpoint and its 50 MB upload limit. Video capture limits are also subject to the camera app/device. Voice recording requires microphone permission.
+
+
+## Firebase Cloud Messaging (FCM) — নতুন সেটআপ
+
+এই সংস্করণে Android অ্যাপ FCM token সংগ্রহ করে লগইন করা ব্যবহারকারীর সঙ্গে সার্ভারে নিবন্ধন করে। সার্ভার ব্যবহারকারীর Socket.IO সংযোগ না থাকলে নতুন টেক্সট/ফাইল মেসেজ ও ফ্রেন্ড রিকুয়েস্টের push পাঠানোর চেষ্টা করে। এটি Socket.IO বা Firestore থেকে সার্ভার URL নেওয়ার ব্যবস্থা বদলায় না।
+
+### 1) সঠিক `google-services.json`
+বর্তমানে পাওয়া Firebase ফাইলটি `com.nishat.ghostmessenger` প্যাকেজের; Adda-এর `applicationId` হলো `com.adda.chatkt`। **ভুল প্যাকেজের ফাইল ব্যবহার করবেন না।**
+Firebase Console → Project settings → Your apps → Add app (Android) থেকে একই Firebase project `ghostmessenger-1bcaf`-এ `com.adda.chatkt` প্যাকেজের Android app নিবন্ধন করুন, তারপর সেই অ্যাপের `google-services.json` ডাউনলোড করে `app/google-services.json`-এ রাখুন। এতে Google Services Gradle plugin স্বয়ংক্রিয়ভাবে চালু হবে। ফাইলটি না থাকলে প্রজেক্ট কম্পাইল হতে পারে, কিন্তু FCM কার্যকর হবে না।
+
+### 2) সার্ভার সেটআপ
+`server-fcm.js`-এর কোড বর্তমান `server.js`-এর জায়গায় ব্যবহার করুন (আগে ব্যাকআপ নিন)। সার্ভার ফোল্ডারে চালান:
+
+```bash
+npm install express socket.io multer cors bcryptjs jsonwebtoken firebase-admin
+```
+
+Firebase Console → Project settings → Service accounts থেকে Admin SDK service-account key তৈরি করুন। সার্ভার মেশিনে ফাইলটি নিরাপদ স্থানে রাখুন এবং environment variable সেট করুন:
+
+```bash
+# Linux/macOS
+export GOOGLE_APPLICATION_CREDENTIALS="/secure/path/firebase-admin-key.json"
+export FIREBASE_PROJECT_ID="ghostmessenger-1bcaf"
+export JWT_SECRET="replace-with-a-long-random-secret"
+node server.js
+```
+
+Windows PowerShell:
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\secure\path\firebase-admin-key.json"
+$env:FIREBASE_PROJECT_ID="ghostmessenger-1bcaf"
+$env:JWT_SECRET="replace-with-a-long-random-secret"
+node server.js
+```
+
+সার্ভিস অ্যাকাউন্ট JSON কখনও GitHub repository, APK, বা চ্যাটে আপলোড করবেন না। পুরোনো `data/users.json` ফাইলে FCM token নতুন করে লগইন/অ্যাপ চালুর পর যুক্ত হবে। আগে থেকে থাকা ব্যবহারকারীদের token ম্যানুয়ালি তৈরি করতে হবে না।
+
+### 3) আচরণ ও সীমাবদ্ধতা
+- অনলাইন Socket.IO সংযোগ থাকলে বিদ্যমান লাইভ ইভেন্ট ব্যবহার হবে; সংযোগ না থাকলে সার্ভার FCM push পাঠানোর চেষ্টা করবে।
+- প্রথমে অ্যাপ খুলে লগইন করতে হবে, যাতে ডিভাইসের FCM token সার্ভারে নিবন্ধিত হয়।
+- Android 13+ এ নোটিফিকেশন অনুমতি চালু থাকতে হবে।
+- Force Stop অবস্থায় Android সাধারণত push/ব্যাকগ্রাউন্ড কার্যক্রম স্থগিত রাখে; ব্যবহারকারী আবার অ্যাপ চালু না করা পর্যন্ত নিশ্চয়তা নেই।
+- এই সংযোজন মেসেজ ও ফ্রেন্ড রিকুয়েস্টের push কভার করে; WebRTC কলের FCM invite/signaling এতে অন্তর্ভুক্ত নয়।

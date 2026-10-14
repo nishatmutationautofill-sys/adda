@@ -66,10 +66,19 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-messaging")
+
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.0") {
         exclude(group = "org.json", module = "json")
     }
     implementation("io.getstream:stream-webrtc-android:1.1.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+}
+
+// google-services.json must belong to applicationId com.adda.chatkt.
+// If it is absent, the project can still compile, but FCM needs the correct file to work.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
