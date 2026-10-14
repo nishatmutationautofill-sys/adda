@@ -223,7 +223,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             if (onlineFriends.isNotEmpty()) {
                 item {
                     Column {
-                        Text("এখন অনলাইনে 🟢", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Ink)
+                        Text("এখন অনলাইনে", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Ink)
                         Spacer(Modifier.height(10.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             items(onlineFriends, key = { "story_$it" }) { uid ->
@@ -255,7 +255,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             if (me.friends.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { Text("💬", fontSize = 38.sp) }
+                        Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.People, contentDescription = null, tint = Accent, modifier = Modifier.size(38.dp)) }
                         Spacer(Modifier.height(12.dp))
                         Text("এখনো কোনো চ্যাট নেই", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
                     }

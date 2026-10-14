@@ -61,9 +61,6 @@ fun AuthScreen() {
         // সাজসজ্জার ভাসমান ইমোজি ও রঙিন বৃত্ত
         Box(Modifier.size(220.dp).offset(x = (-70).dp, y = (-60).dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f)))
         Box(Modifier.align(Alignment.TopEnd).size(160.dp).offset(x = 50.dp, y = 120.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)))
-        Text("💬", fontSize = 34.sp, modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(start = 28.dp, top = 40.dp).alpha(0.55f))
-        Text("✨", fontSize = 30.sp, modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(end = 36.dp, top = 70.dp).alpha(0.65f))
-        Text("🎧", fontSize = 30.sp, modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(start = 70.dp, top = 130.dp).alpha(0.5f))
 
         Column(
             modifier = Modifier
@@ -98,7 +95,7 @@ fun AuthScreen() {
                     Spacer(Modifier.height(18.dp))
                     val fieldColors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent, unfocusedBorderColor = Line,
-                        focusedContainerColor = Color(0xFFFBF9FF), unfocusedContainerColor = Color(0xFFFBF9FF),
+                        focusedContainerColor = Color(0xFFF3F8FE), unfocusedContainerColor = Color(0xFFF3F8FE),
                         focusedLabelColor = Accent
                     )
                     OutlinedTextField(

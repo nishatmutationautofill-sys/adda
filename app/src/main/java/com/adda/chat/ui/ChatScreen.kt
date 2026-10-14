@@ -161,31 +161,31 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
 
     Column(Modifier.fillMaxSize().background(ChatBackdrop).imePadding()) {
         // হেডার
-        Surface(color = Accent, shadowElevation = 8.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
+        Surface(color = Color.White, shadowElevation = 4.dp, shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)) {
             Row(
-                Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp),
+                Modifier.fillMaxWidth().background(Color.White).statusBarsPadding().padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { Session.closeConversation() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান", tint = Navy)
                 }
                 Avatar(
-                    Session.displayName(uid), 46.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid],
+                    Session.displayName(uid), 42.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid],
                     modifier = Modifier.clip(CircleShape).clickable { showProfile = true }
                 )
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Navy, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         if (Session.online[uid] == true) "অনলাইন" else "অফলাইন",
                         fontSize = 12.sp,
-                        color = if (Session.online[uid] == true) Color(0xFFB9FFE5) else Color.White.copy(alpha = 0.75f)
+                        color = if (Session.online[uid] == true) Color(0xFF168653) else Muted
                     )
                 }
                 IconButton(onClick = { requestCallPermission("audio") { CallManager.startCall("audio", uid) } }) {
-                    Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Color.White)
+                    Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Navy)
                 }
                 IconButton(onClick = { requestCallPermission("video") { CallManager.startCall("video", uid) } }) {
-                    Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Color.White)
+                    Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Navy)
                 }
             }
         }
@@ -198,7 +198,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { Text("👋", fontSize = 40.sp) }
+                    Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Lock, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp)) }
                     Spacer(Modifier.size(12.dp))
                     Text("কথা বলা শুরু করুন", fontWeight = FontWeight.Bold, color = Ink)
                 }
@@ -561,13 +561,13 @@ private fun DeferredMediaCard(m: ChatMessage, onLoad: () -> Unit, onMenu: () -> 
     Box(
         Modifier.width(220.dp).height(160.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFFB9BEDD), Color(0xFF8E96C4))))
+            .background(Brush.linearGradient(listOf(Color(0xFFC7DAF3), Color(0xFF9DB8DE))))
             .combinedClickable(onClick = onLoad, onLongClick = onMenu),
         contentAlignment = Alignment.Center
     ) {
         // ব্লার করা রঙের ছোপ (শুধু সাজসজ্জা — আসল ছবি নয়)
         Box(Modifier.size(110.dp).offset(x = (-50).dp, y = (-30).dp).blur(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.45f)))
-        Box(Modifier.size(90.dp).offset(x = 55.dp, y = 35.dp).blur(24.dp).clip(CircleShape).background(Color(0xFF5145F5).copy(alpha = 0.35f)))
+        Box(Modifier.size(90.dp).offset(x = 55.dp, y = 35.dp).blur(24.dp).clip(CircleShape).background(Color(0xFF1769D2).copy(alpha = 0.35f)))
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),

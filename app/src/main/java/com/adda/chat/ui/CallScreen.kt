@@ -77,7 +77,7 @@ fun CallScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF0B0818))) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF0F2A4A))) {
         if (isVideo && phase != Phase.Incoming) {
             VideoView(track = CallManager.remoteVideo, mirror = false, overlay = false, modifier = Modifier.fillMaxSize())
             if (CallManager.localVideo != null) {

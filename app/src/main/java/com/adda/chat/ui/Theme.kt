@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -32,31 +33,33 @@ import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import com.adda.chat.data.Api
 
-// ---- Gen-Z রঙের প্যালেট: ইলেকট্রিক ভায়োলেট → হট পিংক ----
-val Accent = Color(0xFF7B3FF2)
-val AccentLight = Color(0xFFFF4F9A)
-val Canvas = Color(0xFFF8F4FF)
-val Ink = Color(0xFF1B1633)
-val Muted = Color(0xFF8B84A8)
-val Line = Color(0xFFECE5FB)
-val Them = Color(0xFFF1E9FF)
-val Danger = Color(0xFFFF3B6B)
-val Success = Color(0xFF19C37D)
+// ---- আড্ডা নীল-সাদা থিম (হোম স্ক্রিনের হেডার থেকে নেওয়া) ----
+val Accent = Color(0xFF1769D2)
+val AccentLight = Color(0xFF3B8CF0)
+val Navy = Color(0xFF174A8B)
+val Canvas = Color(0xFFF3F8FE)
+val Ink = Color(0xFF0F2A4A)
+val Muted = Color(0xFF6B7F99)
+val Line = Color(0xFFD8E7FA)
+val Them = Color(0xFFEAF2FE)
+val ChipBorder = Color(0xFFD2E3FA)
+val Danger = Color(0xFFE5484D)
+val Success = Color(0xFF1FA86A)
 val Sunny = Color(0xFFFFB02E)
-val BubbleBrush = Brush.linearGradient(listOf(Color(0xFF7B3FF2), Color(0xFFB04DF0), Color(0xFFFF4F9A)))
-/** স্টোরি-স্টাইল রিং (অনলাইন বন্ধুদের জন্য) */
-val StoryRing = Brush.sweepGradient(listOf(Color(0xFFFF4F9A), Color(0xFFFFB02E), Color(0xFF7B3FF2), Color(0xFFFF4F9A)))
-/** চ্যাটের পেছনের হালকা রঙিন ব্যাকগ্রাউন্ড */
-val ChatBackdrop = Brush.verticalGradient(listOf(Color(0xFFF8F4FF), Color(0xFFFFF0F7)))
+val BubbleBrush: Brush = SolidColor(Accent)
+/** অনলাইন বন্ধুদের রিং */
+val StoryRing = Brush.sweepGradient(listOf(Accent, Color(0xFF5BA8F5), Accent))
+/** চ্যাটের পেছনের হালকা নীল ব্যাকগ্রাউন্ড */
+val ChatBackdrop = Brush.verticalGradient(listOf(Canvas, Color(0xFFEAF2FE)))
 
-/** প্রোফাইল ছবি না থাকলে নাম অনুযায়ী আলাদা আলাদা রঙিন গ্রেডিয়েন্ট */
+/** প্রোফাইল ছবি না থাকলে নাম অনুযায়ী নীল-ঘরানার আলাদা আলাদা রং */
 private val avatarPalette = listOf(
-    listOf(Color(0xFF7B3FF2), Color(0xFFFF4F9A)),
-    listOf(Color(0xFF00B8D9), Color(0xFF7B3FF2)),
-    listOf(Color(0xFFFF8A3D), Color(0xFFFF4F9A)),
-    listOf(Color(0xFF19C37D), Color(0xFF00B8D9)),
-    listOf(Color(0xFFFFB02E), Color(0xFFFF6B6B)),
-    listOf(Color(0xFF4F7CFF), Color(0xFF9B5CFF))
+    listOf(Color(0xFF1769D2), Color(0xFF3B8CF0)),
+    listOf(Color(0xFF0E7490), Color(0xFF1769D2)),
+    listOf(Color(0xFF3D5AFE), Color(0xFF1769D2)),
+    listOf(Color(0xFF0F9D8A), Color(0xFF1769D2)),
+    listOf(Color(0xFF174A8B), Color(0xFF3B8CF0)),
+    listOf(Color(0xFF2F6FE0), Color(0xFF6BB0FF))
 )
 fun avatarBrush(name: String): Brush =
     Brush.linearGradient(avatarPalette[(name.hashCode() and 0x7fffffff) % avatarPalette.size])

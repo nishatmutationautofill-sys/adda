@@ -228,7 +228,7 @@ fun VideoMessageCard(url: String, onLongClick: () -> Unit = {}) {
     Box(
         Modifier.width(220.dp).aspectRatio(ratio)
             .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF111827))
+            .background(Color(0xFF0F2A4A))
             .combinedClickable(onClick = { show = true }, onLongClick = onLongClick),
         contentAlignment = Alignment.Center
     ) {
