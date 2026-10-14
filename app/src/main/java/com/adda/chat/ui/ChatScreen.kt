@@ -1,5 +1,11 @@
 package com.adda.chat.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.text.style.TextOverflow
+
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.ContentValues
@@ -152,7 +158,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 }
                 Avatar(Session.displayName(uid), 40.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
+                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         if (Session.online[uid] == true) "অনলাইন" else "অফলাইন",
                         fontSize = 12.sp,
@@ -176,7 +182,8 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("👋", fontSize = 40.sp)
+                    Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { Text("👋", fontSize = 40.sp) }
+                    Spacer(Modifier.size(12.dp))
                     Text("কথা বলা শুরু করুন", fontWeight = FontWeight.Bold, color = Ink)
                     Text("আপনার মেসেজ এখানে দেখা যাবে।", color = Muted, fontSize = 13.sp)
                 }
@@ -199,49 +206,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             }
         }
 
-        // কম্পোজার ও Secure Me
-        Surface(color = Color.White) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = secureMode, onCheckedChange = { secureMode = it })
-                    Text("Secure Me", fontWeight = FontWeight.SemiBold, color = if (secureMode) Color(0xFFB3261E) else Ink)
-                    Spacer(Modifier.weight(1f))
-                    if (secureMode) Text("স্বয়ংক্রিয় ডিলেট", color = Color(0xFFB3261E), fontSize = 12.sp)
-                }
-                if (secureMode) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${ttlSeconds}s", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
-                        Slider(
-                            value = ttlSeconds.toFloat(),
-                            onValueChange = { ttlSeconds = it.toInt().coerceIn(1, 60) },
-                            valueRange = 1f..60f,
-                            steps = 58,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("60s", color = Muted, fontSize = 11.sp)
-                    }
-                }
-                if (Session.mediaUploadProgress != null) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        Text(Session.mediaUploadLabel, fontSize = 12.sp, color = Muted)
-                        LinearProgressIndicator(progress = { Session.mediaUploadProgress ?: 0f }, modifier = Modifier.fillMaxWidth())
-                        Text("${((Session.mediaUploadProgress ?: 0f) * 100).toInt()}%", fontSize = 11.sp, color = Muted)
-                    }
-                }
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 0.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = { picker.launch("*/*") }) { Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল", tint = Accent) }
-                    IconButton(onClick = { showEmojiPack = true }) { Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = Accent) }
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = {
-                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
-                        try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
-                    }) { Icon(Icons.Filled.Videocam, contentDescription = "১ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
-                    IconButton(onClick = {
+        val toggleRecord: () -> Unit = {
                         if (recording) {
                             try { recorder?.stop() } catch (_: Exception) { }
                             try { recorder?.release() } catch (_: Exception) { }
@@ -274,37 +239,102 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                                 }
                             }
                         }
-                    }) {
-                        Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
-                            contentDescription = if (recording) "রেকর্ডিং বন্ধ করে পাঠান" else "ভয়েস মেসেজ রেকর্ড",
-                            tint = if (recording) Color.Red else Accent)
+        }
+
+        // কম্পোজার
+        Surface(color = Color.White, shadowElevation = 10.dp) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50))
+                            .background(if (secureMode) Color(0xFFFDECEA) else Canvas)
+                            .border(1.dp, if (secureMode) Color(0xFFB3261E) else Line, RoundedCornerShape(50))
+                            .clickable { secureMode = !secureMode }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(15.dp),
+                            tint = if (secureMode) Color(0xFFB3261E) else Muted)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Secure Me", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                            color = if (secureMode) Color(0xFFB3261E) else Muted)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (secureMode) Text("স্বয়ংক্রিয় ডিলেট", color = Color(0xFFB3261E), fontSize = 12.sp)
+                }
+                if (secureMode) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${ttlSeconds}s", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
+                        Slider(
+                            value = ttlSeconds.toFloat(),
+                            onValueChange = { ttlSeconds = it.toInt().coerceIn(1, 60) },
+                            valueRange = 1f..60f,
+                            steps = 58,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("60s", color = Muted, fontSize = 11.sp)
                     }
                 }
-                TextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    placeholder = { Text(if (recording) "ভয়েস রেকর্ড হচ্ছে…" else "মেসেজ লিখুন…") },
-                    maxLines = 4,
-                    shape = RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Canvas,
-                        unfocusedContainerColor = Canvas,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(
-                    onClick = {
-                        val text = input.trim()
-                        if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds) { ok -> if (ok) input = "" }
-                    },
-                    enabled = input.isNotBlank()
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "পাঠান",
-                        tint = if (input.isNotBlank()) Accent else Muted)
+                if (Session.mediaUploadProgress != null) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                            .clip(RoundedCornerShape(14.dp)).background(Them).padding(12.dp)
+                    ) {
+                        Text(Session.mediaUploadLabel, fontSize = 12.sp, color = Ink, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.size(6.dp))
+                        LinearProgressIndicator(
+                            progress = { Session.mediaUploadProgress ?: 0f },
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)),
+                            color = Accent, trackColor = Color.White
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text("${((Session.mediaUploadProgress ?: 0f) * 100).toInt()}%", fontSize = 11.sp, color = Muted)
+                    }
                 }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { picker.launch("*/*") }) { Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল", tint = Accent) }
+                    IconButton(onClick = {
+                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
+                        try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
+                    }) { Icon(Icons.Filled.Videocam, contentDescription = "১ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
+                    TextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        placeholder = { Text(if (recording) "ভয়েস রেকর্ড হচ্ছে…" else "মেসেজ লিখুন…", color = Muted) },
+                        maxLines = 4,
+                        shape = RoundedCornerShape(24.dp),
+                        trailingIcon = {
+                            IconButton(onClick = { showEmojiPack = true }) {
+                                Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = Muted)
+                            }
+                        },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Canvas,
+                            unfocusedContainerColor = Canvas,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    val hasText = input.isNotBlank()
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape)
+                            .let { if (recording) it.background(Color(0xFFE54868)) else it.background(BubbleBrush) }
+                            .clickable {
+                                val text = input.trim()
+                                if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds) { ok -> if (ok) input = "" }
+                                else toggleRecord()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (hasText) Icons.AutoMirrored.Filled.Send else if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
+                            contentDescription = if (hasText) "পাঠান" else if (recording) "রেকর্ডিং বন্ধ করে পাঠান" else "ভয়েস মেসেজ রেকর্ড",
+                            tint = Color.White
+                        )
+                    }
                 }
             }
         }
@@ -379,11 +409,15 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
         ),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
-        val shape = RoundedCornerShape(18.dp)
+        val shape = RoundedCornerShape(
+            topStart = 20.dp, topEnd = 20.dp,
+            bottomEnd = if (mine) 5.dp else 20.dp,
+            bottomStart = if (mine) 20.dp else 5.dp
+        )
         val bubbleModifier = Modifier
             .widthIn(max = 290.dp)
             .clip(shape)
-            .let { if (mine) it.background(BubbleBrush) else it.background(Them) }
+            .let { if (mine) it.background(BubbleBrush) else it.background(Color.White).border(1.dp, Line, shape) }
 
         if (m.isImage) {
             val url = Api.absoluteUrl(m.fileUrl.orEmpty())
@@ -397,8 +431,9 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .sizeIn(maxWidth = 240.dp, maxHeight = 300.dp)
-                    .clip(shape)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(Them)
+                    .border(1.dp, Line, RoundedCornerShape(18.dp))
                     .clickable { onOpenImage(url) }
             )
         } else if (m.isFile) {
@@ -406,7 +441,13 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
             val fileName = m.fileName ?: "ফাইল"
             val isAudio = fileName.endsWith(".m4a", true) || fileName.endsWith(".mp3", true) || fileName.endsWith(".aac", true) || fileName.endsWith(".wav", true) || fileName.endsWith(".ogg", true)
             val isVideo = fileName.endsWith(".mp4", true) || fileName.endsWith(".webm", true) || fileName.endsWith(".3gp", true) || fileName.endsWith(".mov", true)
-            Row(bubbleModifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(bubbleModifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                        .background(if (mine) Color.White.copy(alpha = 0.22f) else Them),
+                    contentAlignment = Alignment.Center
+                ) { Text(if (isAudio) "🎙️" else if (isVideo) "🎬" else "📎", fontSize = 20.sp) }
+                Spacer(Modifier.size(10.dp))
                 Column(Modifier.weight(1f).clickable {
                     if (m.secure) {
                         Toast.makeText(ctx, "সিকিউর ফাইল অ্যাপের বাইরে খোলা বা ডাউনলোড করা যাবে না", Toast.LENGTH_SHORT).show()
@@ -417,8 +458,8 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                         } catch (_: Exception) { onDownload(url) }
                     }
                 }.padding(end = 8.dp)) {
-                    Text("${if (isAudio) "🎙️" else if (isVideo) "🎬" else "📎"} $fileName",
-                        color = if (mine) Color.White else Accent, fontWeight = FontWeight.SemiBold)
+                    Text(fileName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (mine) Color.White else Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     if (m.size > 0) Text("%.2f MB".format(m.size / 1024.0 / 1024.0),
                         color = if (mine) Color.White.copy(alpha = 0.8f) else Muted, fontSize = 12.sp)
                 }
@@ -430,11 +471,11 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
             }
         } else {
             Box(bubbleModifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
-                Text(m.text, color = if (mine) Color.White else Ink, fontSize = 16.sp)
+                Text(m.text, color = if (mine) Color.White else Ink, fontSize = 16.sp, lineHeight = 22.sp)
             }
         }
         Text(
-            "${if (mine) "আপনি" else Session.displayName(m.from)} · ${timeFormat.format(Date(m.date))}",
+            "${timeFormat.format(Date(m.date))}",
             fontSize = 11.sp,
             color = Muted,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

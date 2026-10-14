@@ -9,6 +9,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +42,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -118,9 +121,9 @@ fun HomeScreen() {
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
         // আধুনিক গ্রেডিয়েন্ট হেডার
-        Surface(color = Accent, shadowElevation = 4.dp) {
+        Surface(color = Accent, shadowElevation = 6.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
             Row(
-                Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding().padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = 14.dp),
+                Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding().padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
@@ -156,12 +159,12 @@ fun HomeScreen() {
 
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // প্রোফাইল কার্ড
             item {
-                Surface(shape = RoundedCornerShape(22.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(64.dp).clickable { photoPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
                             Avatar(me.username, 58.dp, photoUrl = me.profilePhoto)
@@ -182,16 +185,16 @@ fun HomeScreen() {
 
             // QR দিয়ে সরাসরি বন্ধু যোগ
             item {
-                Surface(shape = RoundedCornerShape(22.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp)) {
                         Text("QR কোড দিয়ে বন্ধু যোগ", fontWeight = FontWeight.SemiBold, color = Ink)
                         Text("নিজের QR দেখান অথবা অন্যজনের QR স্ক্যান করুন। স্ক্যান হলেই দুজন স্বয়ংক্রিয়ভাবে বন্ধু হবেন।", color = Muted, fontSize = 12.sp)
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = { showMyQr = true }, modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { showMyQr = true }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(50), border = BorderStroke(1.dp, Accent)) {
                                 Text("আমার QR দেখান")
                             }
-                            Button(onClick = { startQrScan() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
+                            Button(onClick = { startQrScan() }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(50)) {
                                 Text("QR স্ক্যান করুন")
                             }
                         }
@@ -201,9 +204,9 @@ fun HomeScreen() {
 
             // প্রোফাইল, ছবি এবং পাবলিক বন্ধু-চাই সেটিং
             item {
-                Surface(shape = RoundedCornerShape(22.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("প্রোফাইল ও বন্ধু খোঁজা", fontWeight = FontWeight.SemiBold, color = Ink)
+                        Text("প্রোফাইল ও বন্ধু খোঁজা", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.weight(1f)) {
@@ -222,9 +225,9 @@ fun HomeScreen() {
 
             // বন্ধু যোগ
             item {
-                Surface(shape = RoundedCornerShape(22.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("বন্ধু যোগ করুন", fontWeight = FontWeight.SemiBold, color = Ink)
+                        Text("বন্ধু যোগ করুন", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
@@ -232,6 +235,8 @@ fun HomeScreen() {
                                 onValueChange = { friendUid = it },
                                 placeholder = { Text("বন্ধুর আইডি") },
                                 singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFFAFBFF)),
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(Modifier.size(8.dp))
@@ -249,9 +254,9 @@ fun HomeScreen() {
 
             // রিকুয়েস্ট
             if (me.requests.isNotEmpty()) {
-                item { Text("ফ্রেন্ড রিকুয়েস্ট (${me.requests.size})", fontWeight = FontWeight.Bold, color = Ink) }
+                item { Text("ফ্রেন্ড রিকুয়েস্ট (${me.requests.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
                 items(me.requests, key = { "req_$it" }) { uid ->
-                    Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Avatar(Session.displayName(uid), 44.dp)
                             Spacer(Modifier.size(10.dp))
@@ -261,7 +266,7 @@ fun HomeScreen() {
                             }
                             Button(onClick = { Session.respondRequest(uid, true) }, shape = RoundedCornerShape(50)) { Text("গ্রহণ") }
                             Spacer(Modifier.size(6.dp))
-                            OutlinedButton(onClick = { Session.respondRequest(uid, false) }, shape = RoundedCornerShape(50)) { Text("বাতিল") }
+                            OutlinedButton(onClick = { Session.respondRequest(uid, false) }, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, Line)) { Text("বাতিল") }
                         }
                     }
                 }
@@ -269,7 +274,8 @@ fun HomeScreen() {
 
             // বন্ধু এবং বন্ধু হতে আগ্রহী ইউজার — দুটি ট্যাব
             item {
-                TabRow(selectedTabIndex = peopleTab, containerColor = Color.White, contentColor = Accent) {
+                TabRow(selectedTabIndex = peopleTab, containerColor = Color.Transparent, contentColor = Accent,
+                    divider = {}, modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White)) {
                     Tab(selected = peopleTab == 0, onClick = { peopleTab = 0 }, text = { Text("বন্ধুরা (${me.friends.size})") })
                     Tab(selected = peopleTab == 1, onClick = { peopleTab = 1; Session.refreshDiscoverableUsers() }, text = { Text("বন্ধু চাই (${Session.discoverableUsers.size})") })
                 }
@@ -278,13 +284,14 @@ fun HomeScreen() {
                 item {
                     OutlinedTextField(value = friendSearch, onValueChange = { friendSearch = it },
                         placeholder = { Text("নাম বা আইডি দিয়ে বন্ধু খুঁজুন") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp))
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color.White))
                 }
                 if (me.friends.isEmpty()) item { Text("এখনো কাউকে যোগ করেননি", color = Muted) }
                 else if (filteredFriends.isEmpty()) item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
                 items(filteredFriends, key = { "fr_$it" }) { uid ->
                     val unread = Session.unread[uid] ?: 0
-                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 1.dp,
+                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line),
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { Session.openConversation(uid) }) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Avatar(Session.displayName(uid), 48.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
@@ -301,7 +308,7 @@ fun HomeScreen() {
                 item { Text("যারা বন্ধু হতে আগ্রহী", fontWeight = FontWeight.SemiBold, color = Ink) }
                 if (Session.discoverableUsers.isEmpty()) item { Text("এখনো কেউ ‘বন্ধু চাই’ চালু করেননি।", color = Muted) }
                 items(Session.discoverableUsers.filter { it.uid !in me.friends && it.uid !in me.requests && it.uid != me.uid }, key = { "discover_${it.uid}" }) { person ->
-                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Avatar(person.username, 46.dp, photoUrl = person.profilePhoto)
                             Spacer(Modifier.size(10.dp))

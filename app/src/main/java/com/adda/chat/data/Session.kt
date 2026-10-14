@@ -576,18 +576,24 @@ object Session {
                     } finally { retriever.release() }
                     if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
                     if (durationMs > 60L * 1000L) throw IllegalArgumentException("১ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
-                    mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে (480p / 30 FPS / H.265)…"
+                    mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে…"
                     val converted = withContext(Dispatchers.IO) { VideoTranscoder.transcode(appContext, uri, durationMs) }
-                    transcodedVideo = converted.file
-                    FileUpload.prepare(appContext, android.net.Uri.fromFile(converted.file))
+                    if (converted != null) {
+                        transcodedVideo = converted.file
+                        withContext(Dispatchers.IO) { FileUpload.prepare(appContext, android.net.Uri.fromFile(converted.file)) }
+                    } else {
+                        withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
+                    }
                 } else {
                     withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
                 }
                 if (prepared.size > 50L * 1024 * 1024) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
                 mediaUploadLabel = "ফাইল এনক্রিপ্ট হচ্ছে…"
-                val buffer = Buffer()
-                withContext(Dispatchers.IO) { prepared.body.writeTo(buffer) }
-                val plainBytes = buffer.readByteArray()
+                val plainBytes = withContext(Dispatchers.IO) {
+                    val buffer = Buffer()
+                    prepared.body.writeTo(buffer)
+                    buffer.readByteArray().also { buffer.clear() }
+                }
                 if (plainBytes.size > 50L * 1024 * 1024 - 16) throw IllegalArgumentException("এনক্রিপশনসহ ফাইলটি ৫০ MB ছাড়িয়ে যাচ্ছে")
                 val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
                 val peer = peerE2eePublicKey(to)
@@ -624,6 +630,8 @@ object Session {
             } catch (e: Api.ApiException) { toast(e.message) }
             catch (e: IllegalArgumentException) { toast(e.message) }
             catch (e: Exception) { toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}") }
+            catch (e: OutOfMemoryError) { toast("মেমরি কম পড়েছে, ছোট ফাইল পাঠান") }
+            catch (e: Throwable) { toast("ফাইল পাঠানো যায়নি: ${e.javaClass.simpleName}") }
             finally {
                 mediaUploadProgress = null
                 mediaUploadLabel = ""
