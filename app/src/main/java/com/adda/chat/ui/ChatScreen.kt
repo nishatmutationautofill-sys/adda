@@ -17,6 +17,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -88,7 +90,6 @@ import com.adda.chat.data.Session
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.foundation.ExperimentalFoundationApi
 
 @Composable
 fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit) {
@@ -220,29 +221,26 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         Text("60s", color = Muted, fontSize = 11.sp)
                     }
                 }
+                if (Session.mediaUploadProgress != null) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Text(Session.mediaUploadLabel, fontSize = 12.sp, color = Muted)
+                        LinearProgressIndicator(progress = { Session.mediaUploadProgress ?: 0f }, modifier = Modifier.fillMaxWidth())
+                        Text("${((Session.mediaUploadProgress ?: 0f) * 100).toInt()}%", fontSize = 11.sp, color = Muted)
+                    }
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 0.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = { picker.launch("*/*") }) {
-                        Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল পাঠান", tint = Accent)
-                    }
-                    IconButton(onClick = {
-                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
-                            .putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60)
-                            .putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
-                        try { videoCapture.launch(intent) } catch (_: Exception) {
-                            Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show()
-                        }
-                    }) {
-                        Icon(Icons.Filled.Videocam, contentDescription = "৬০ সেকেন্ডের ভিডিও", tint = Accent)
-                    }
+                    IconButton(onClick = { picker.launch("*/*") }) { Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল", tint = Accent) }
+                    IconButton(onClick = { showEmojiPack = true }) { Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = Accent) }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = { showEmojiPack = true }) {
-                        Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = Accent)
-                    }
+                    IconButton(onClick = {
+                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
+                        try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
+                    }) { Icon(Icons.Filled.Videocam, contentDescription = "১ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
                     IconButton(onClick = {
                         if (recording) {
                             try { recorder?.stop() } catch (_: Exception) { }
@@ -364,9 +362,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     }
 
     viewerUrl?.let { url ->
-        ImageViewer(url = url, onClose = { viewerUrl = null }, allowDownload = !viewerSecure, onDownload = {
-            downloadFile(ctx, url, "adda_download")
-        })
+        ImageViewer(url = url, onClose = { viewerUrl = null })
     }
 }
 
@@ -447,7 +443,7 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
 }
 
 @Composable
-private fun ImageViewer(url: String, onClose: () -> Unit, allowDownload: Boolean, onDownload: () -> Unit) {
+private fun ImageViewer(url: String, onClose: () -> Unit) {
     val ctx = LocalContext.current
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -462,13 +458,6 @@ private fun ImageViewer(url: String, onClose: () -> Unit, allowDownload: Boolean
                 modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White)
-            }
-            if (allowDownload) {
-                Button(
-                    onClick = onDownload,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)
-                ) { Text("ডাউনলোড") }
             }
         }
     }

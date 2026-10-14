@@ -130,3 +130,14 @@ node server.js
 - এই সংস্করণে প্রতি অ্যাকাউন্টে এক Android keypair ধরে নেওয়া হয়েছে। অ্যাপ ডেটা মুছে ফেললে/অ্যাপ আনইনস্টল করলে private key হারিয়ে পুরোনো encrypted মেসেজ আর খোলা যাবে না। Key recovery বা multi-device key sync নেই।
 - Secure Me screenshot/recording প্রতিরোধ Android-এর স্বাভাবিক capture path-এ কাজ করে; অন্য ফোনের ক্যামেরা, rooted/compromised device, modified OS বা receiver নিজে কনটেন্ট কপি করা শতভাগ আটকানো যায় না।
 - এই পরিবর্তনের জন্য Kotlin/Gradle source staticভাবে পর্যালোচনা করা হয়েছে; এখানে Android APK build ও দুইটি বাস্তব ফোনে end-to-end test চালানো সম্ভব হয়নি। Deploy করার আগে Android Studio/GitHub Actions-এ build করে দুইটি Android account দিয়ে test করুন।
+
+
+### QR Friend Add (Android)
+- Home screen has “আমার QR দেখান” and “QR স্ক্যান করুন”.
+- QR contains only the account UID in an `adda://friend/` payload; no password, token, or encryption key is included.
+- A successful scan immediately adds both accounts as friends via `/api/friends/qr-add`.
+- Camera permission is requested only when scanning.
+
+### Video upload transcoding
+
+Selected videos are checked against the 5-minute limit, then transcoded before E2EE encryption/upload to MP4 with H.265/HEVC video, AAC audio, a maximum 1280x720 frame size, and 30 fps. This uses the FFmpegKit full build (including libx265). WebM is intentionally not used for HEVC because HEVC is not a standard WebM codec; MP4 is the compatible container for H.265. Transcoded output remains subject to the server's existing 50 MB upload limit. Device/build verification is required before release.

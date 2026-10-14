@@ -75,6 +75,9 @@ dependencies {
     }
     implementation("io.getstream:stream-webrtc-android:1.1.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // FFmpeg-based video transcoding to MP4 / H.265 (HEVC), 720p, 30 fps.
+    implementation("io.github.junkfood:ffmpeg-kit-full:6.0.LTS")
 }
 
 // google-services.json must belong to applicationId com.adda.chatkt.

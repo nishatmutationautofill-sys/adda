@@ -62,18 +62,18 @@ fun AuthScreen() {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier.size(76.dp).clip(CircleShape).background(BubbleBrush),
+            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(28.dp)).background(BubbleBrush),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(38.dp))
+            Icon(Icons.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(43.dp))
         }
         Spacer(Modifier.height(14.dp))
-        Text("আড্ডা", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-        Text("ব্যক্তিগত চ্যাট", color = Muted)
+        Text("আড্ডা Messenger", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+        Text("বন্ধুত্ব • আড্ডা • কথা • সবসময়", color = Muted, fontSize = 13.sp)
         Spacer(Modifier.height(24.dp))
 
-        Surface(shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp)) {
+        Surface(shape = RoundedCornerShape(28.dp), color = Color.White, shadowElevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ModeTab("লগইন", !signup, Modifier.weight(1f)) { signup = false }
                     ModeTab("সাইন আপ", signup, Modifier.weight(1f)) { signup = true }

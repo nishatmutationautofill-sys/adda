@@ -25,16 +25,16 @@ import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import com.adda.chat.data.Api
 
-val Accent = Color(0xFF4D4FE8)
-val AccentLight = Color(0xFF3F8CFF)
-val Canvas = Color(0xFFF3F4F8)
-val Ink = Color(0xFF14161F)
-val Muted = Color(0xFF7A8094)
-val Line = Color(0xFFE8EAF1)
-val Them = Color(0xFFECEEF5)
-val Danger = Color(0xFFE5484D)
-val Success = Color(0xFF22B573)
-val BubbleBrush = Brush.linearGradient(listOf(Color(0xFF5A5CF0), Color(0xFF3F8CFF)))
+val Accent = Color(0xFF5145F5)
+val AccentLight = Color(0xFF3287FF)
+val Canvas = Color(0xFFF5F6FC)
+val Ink = Color(0xFF171A35)
+val Muted = Color(0xFF7D839F)
+val Line = Color(0xFFE6E8F5)
+val Them = Color(0xFFEEF0FF)
+val Danger = Color(0xFFE54868)
+val Success = Color(0xFF16B887)
+val BubbleBrush = Brush.linearGradient(listOf(Color(0xFF5548F5), Color(0xFF267DFA)))
 
 @Composable
 fun AddaTheme(content: @Composable () -> Unit) {

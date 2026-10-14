@@ -13,6 +13,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.adda.chat.service.ConnectionService
 import com.adda.chat.security.E2ee
 import com.adda.chat.util.FileUpload
+import com.adda.chat.util.VideoTranscoder
 import com.adda.chat.util.Notifier
 import io.socket.client.Ack
 import io.socket.client.IO
@@ -30,6 +31,8 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import okio.Buffer
+import okio.ForwardingSink
+import okio.buffer
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -48,6 +51,9 @@ object Session {
     var hasToken by mutableStateOf(false)
     var me by mutableStateOf<Me?>(null)
     var busy by mutableStateOf(false)
+    var mediaUploadProgress by mutableStateOf<Float?>(null)
+    var mediaUploadLabel by mutableStateOf("")
+    var requestInitialProfilePhoto by mutableStateOf(false)
     var authError by mutableStateOf("")
     var activeFriend by mutableStateOf<String?>(null)
     var toastMsg by mutableStateOf<ToastMsg?>(null)
@@ -216,6 +222,7 @@ object Session {
                 prefs.edit().putString("messengerToken", Api.token).apply()
                 hasToken = true
                 me = parseMe(r.getJSONObject("user"))
+                if (signup) requestInitialProfilePhoto = true
                 enterMessenger()
                 toast(if (signup) "অ্যাকাউন্ট তৈরি হয়েছে। আপনার আইডি: ${me?.uid}" else "লগইন সফল হয়েছে")
             } catch (e: Api.ApiException) {
@@ -269,6 +276,33 @@ object Session {
                     }
                 }
             }.awaitAll()
+        }
+    }
+
+    fun addFriendByQr(rawValue: String) {
+        val scanned = rawValue.trim()
+        val prefix = "adda://friend/"
+        if (!scanned.startsWith(prefix, ignoreCase = true)) {
+            toast("এটি আড্ডার বন্ধু যোগ করার QR কোড নয়")
+            return
+        }
+        val uid = scanned.substring(prefix.length).trim().uppercase()
+        if (!Regex("^MSG-[A-F0-9]{8}$").matches(uid)) {
+            toast("QR কোডে সঠিক আড্ডা আইডি নেই")
+            return
+        }
+        if (uid == me?.uid) {
+            toast("নিজেকে বন্ধু হিসেবে যোগ করা যাবে না")
+            return
+        }
+        scope.launch {
+            try {
+                val result = Api.postObj("/api/friends/qr-add", JSONObject().put("uid", uid))
+                refreshPeople()
+                toast(result.optString("message").ifEmpty { "QR স্ক্যান সফল — এখন আপনারা বন্ধু" })
+            } catch (e: Api.ApiException) {
+                toast(e.message)
+            }
         }
     }
 
@@ -515,15 +549,42 @@ object Session {
     }
 
     fun sendFile(uri: Uri, secure: Boolean = false, ttlSeconds: Int = 3) {
-        val to = activeFriend ?: run {
-            toast("ফাইল পাঠাতে আগে একজন বন্ধুকে নির্বাচন করুন")
-            return
-        }
+        val to = activeFriend ?: run { toast("ফাইল পাঠাতে আগে একজন বন্ধুকে নির্বাচন করুন"); return }
+        if (mediaUploadProgress != null) { toast("আগের ফাইলটি আপলোড হচ্ছে"); return }
         scope.launch {
+            var transcodedVideo: java.io.File? = null
             try {
-                toast("ফাইল এনক্রিপ্ট হচ্ছে…")
-                val prepared = withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
+                mediaUploadProgress = 0f
+                mediaUploadLabel = "ফাইল প্রস্তুত হচ্ছে…"
+                val pickedName = withContext(Dispatchers.IO) {
+                    if (uri.scheme == "file") uri.lastPathSegment.orEmpty() else {
+                        appContext.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                            if (c.moveToFirst()) {
+                                val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (idx >= 0) c.getString(idx).orEmpty() else ""
+                            } else ""
+                        } ?: ""
+                    }
+                }
+                val isVideo = (appContext.contentResolver.getType(uri)?.startsWith("video/") == true) ||
+                    pickedName.substringAfterLast('.', "").lowercase() in listOf("mp4", "webm", "mov", "mkv", "3gp", "m4v", "avi")
+                val prepared = if (isVideo) {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    val durationMs = try {
+                        retriever.setDataSource(appContext, uri)
+                        retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    } finally { retriever.release() }
+                    if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
+                    if (durationMs > 60L * 1000L) throw IllegalArgumentException("১ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
+                    mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে (480p / 30 FPS / H.265)…"
+                    val converted = withContext(Dispatchers.IO) { VideoTranscoder.transcode(appContext, uri, durationMs) }
+                    transcodedVideo = converted.file
+                    FileUpload.prepare(appContext, android.net.Uri.fromFile(converted.file))
+                } else {
+                    withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
+                }
                 if (prepared.size > 50L * 1024 * 1024) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
+                mediaUploadLabel = "ফাইল এনক্রিপ্ট হচ্ছে…"
                 val buffer = Buffer()
                 withContext(Dispatchers.IO) { prepared.body.writeTo(buffer) }
                 val plainBytes = buffer.readByteArray()
@@ -531,28 +592,43 @@ object Session {
                 val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
                 val peer = peerE2eePublicKey(to)
                 val senderUid = me?.uid ?: throw IllegalStateException("লগইন নেই")
-                val encrypted = withContext(Dispatchers.Default) {
-                    E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime)
-                }
+                val encrypted = withContext(Dispatchers.Default) { E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime) }
                 val encryptedBody = encrypted.bytes.toRequestBody("application/octet-stream".toMediaType())
-                val form = MultipartBody.Builder().setType(MultipartBody.FORM)
+                val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
                     .addFormDataPart("file", "encrypted.bin", encryptedBody)
-                    .addFormDataPart("to", to)
-                    .addFormDataPart("encrypted", "true")
-                    .addFormDataPart("envelope", encrypted.envelope)
-                    .addFormDataPart("secure", secure.toString())
-                    .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
-                    .build()
-                val resp = Api.request("POST", "/api/messages/file", body = form)
+                    .addFormDataPart("to", to).addFormDataPart("encrypted", "true")
+                    .addFormDataPart("envelope", encrypted.envelope).addFormDataPart("secure", secure.toString())
+                    .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
+                mediaUploadLabel = "আপলোড হচ্ছে…"
+                val total = multipart.contentLength().coerceAtLeast(1L)
+                val progressBody = object : okhttp3.RequestBody() {
+                    override fun contentType() = multipart.contentType()
+                    override fun contentLength() = multipart.contentLength()
+                    override fun writeTo(sink: okio.BufferedSink) {
+                        val forwarding = object : ForwardingSink(sink) {
+                            var written = 0L
+                            override fun write(source: Buffer, byteCount: Long) {
+                                super.write(source, byteCount)
+                                written += byteCount
+                                mediaUploadProgress = (written.toFloat() / total).coerceIn(0f, 1f)
+                            }
+                        }.buffer()
+                        multipart.writeTo(forwarding)
+                        forwarding.flush()
+                    }
+                }
+                val resp = Api.request("POST", "/api/messages/file", body = progressBody)
                 val raw = parseMessage(JSONObject(resp))
                 addMessage(hydrateMessage(raw))
                 toast(if (secure) "সিকিউর ফাইল পাঠানো হয়েছে" else "এনক্রিপ্টেড ফাইল পাঠানো হয়েছে")
-            } catch (e: Api.ApiException) {
-                toast(e.message)
-            } catch (e: IllegalArgumentException) {
-                toast(e.message)
-            } catch (e: Exception) {
-                toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}")
+            } catch (e: Api.ApiException) { toast(e.message) }
+            catch (e: IllegalArgumentException) { toast(e.message) }
+            catch (e: Exception) { toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}") }
+            finally {
+                mediaUploadProgress = null
+                mediaUploadLabel = ""
+                // Remove only the generated compressed copy; the user's original video is untouched.
+                transcodedVideo?.delete()
             }
         }
     }
@@ -656,6 +732,13 @@ object Session {
         }
         s.on("friend:rejected") {
             scope.launch { toast("আপনার ফ্রেন্ড রিকুয়েস্ট গ্রহণ করা হয়নি") }
+        }
+        s.on("friend:qr-added") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            scope.launch {
+                refreshPeople()
+                toast("${o?.optString("username")?.ifEmpty { null } ?: "নতুন বন্ধু"} আপনাকে QR দিয়ে বন্ধু করেছেন")
+            }
         }
         s.on("presence:update") { args ->
             (args.firstOrNull() as? JSONObject)?.let { o ->
