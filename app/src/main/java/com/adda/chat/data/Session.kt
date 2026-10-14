@@ -68,6 +68,11 @@ object Session {
     val lastPreview = mutableStateMapOf<String, ChatPreview>()
     val messages = mutableStateListOf<ChatMessage>()
     val discoverableUsers = mutableStateListOf<DiscoverableUser>()
+    /** ব্লার থাকা আগের ছবি/ভিডিও যেগুলো ইউজার ট্যাপ করে লোড করেছে (শুধু এই চ্যাট খোলা থাকা পর্যন্ত) */
+    val loadedMedia = mutableStateMapOf<String, Boolean>()
+
+    /** ৩ দিনের পুরনো ডাটা ডিভাইস থেকে মুছে যায় (সার্ভারেও একই নিয়ম) */
+    const val RETENTION_MS = 3L * 24 * 60 * 60 * 1000
 
     @Volatile var appInForeground = false
 
@@ -86,6 +91,39 @@ object Session {
         hasToken = Api.token.isNotEmpty()
         Notifier.init(appContext)
         startServerUrlWatcher()
+        startRetentionSweeper()
+    }
+
+    // ---------- ৩ দিনের পুরনো ডাটা মোছা (ডিভাইস) ----------
+
+    private fun startRetentionSweeper() {
+        scope.launch {
+            while (true) {
+                try { purgeOldLocalData() } catch (_: Exception) { }
+                delay(10 * 60 * 1000L)
+            }
+        }
+    }
+
+    private suspend fun purgeOldLocalData() {
+        val cutoff = System.currentTimeMillis() - RETENTION_MS
+        messages.filter { it.date < cutoff }.forEach { old ->
+            old.fileUrl?.takeIf { it.startsWith("file:") }?.let { uri ->
+                Uri.parse(uri).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } }
+            }
+        }
+        messages.removeAll { it.date < cutoff }
+        lastPreview.filterValues { it.date < cutoff }.keys.toList().forEach { lastPreview.remove(it) }
+        withContext(Dispatchers.IO) {
+            // ডিক্রিপ্ট করা মিডিয়া, ভয়েস রেকর্ড ও ইমেজ ক্যাশের ৩ দিনের পুরনো ফাইল
+            appContext.cacheDir.walkTopDown()
+                .filter { it.isFile && it.lastModified() < cutoff }
+                .filter { f ->
+                    f.name.startsWith("e2ee_") || f.name.startsWith("voice_") ||
+                        f.absolutePath.contains("image_cache")
+                }
+                .forEach { it.delete() }
+        }
     }
 
     fun toast(text: String?) {
@@ -255,6 +293,7 @@ object Session {
         online.clear()
         unread.clear()
         lastPreview.clear()
+        loadedMedia.clear()
     }
 
     // ---------- বন্ধু ----------
@@ -371,16 +410,31 @@ object Session {
         }
     }
 
-    fun deleteMessage(message: ChatMessage) {
+    /** everyone=true → উভয় দিক থেকে (শুধু নিজের পাঠানো মেসেজে); false → শুধু নিজের দিক থেকে */
+    fun deleteMessage(message: ChatMessage, everyone: Boolean) {
+        val forEveryone = everyone && message.from == me?.uid
         scope.launch {
             try {
-                Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}")
+                Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}?scope=${if (forEveryone) "everyone" else "me"}")
                 messages.firstOrNull { it.id == message.id }?.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } } }
                 messages.removeAll { it.id == message.id }
-                toast("মেসেজ/ফাইল ডিলেট হয়েছে")
+                refreshPreviewFor(if (message.from == me?.uid) message.to else message.from)
+                toast(if (forEveryone) "উভয় দিক থেকে ডিলেট হয়েছে" else "আপনার দিক থেকে ডিলেট হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }
         }
     }
+
+    /** ডিলেটের পর চ্যাট লিস্টের শেষ মেসেজ প্রিভিউ ঠিক করা */
+    private fun refreshPreviewFor(peer: String) {
+        val myUid = me?.uid ?: return
+        val last = messages.filter { (it.from == peer && it.to == myUid) || (it.from == myUid && it.to == peer) }.maxByOrNull { it.date }
+        if (last == null) { lastPreview.remove(peer); return }
+        lastPreview.remove(peer)
+        recordPreview(peer, last, last.from == myUid)
+    }
+
+    /** ব্লার থাকা আগের ছবি/ভিডিও ইউজার চাইলে লোড করে */
+    fun loadMedia(id: String) { loadedMedia[id] = true }
 
     fun respondRequest(uid: String, accept: Boolean) {
         scope.launch {
@@ -401,12 +455,14 @@ object Session {
         unread.remove(uid)
         messages.clear()
         seenIds.clear()
+        loadedMedia.clear()
         scope.launch {
             try {
                 val arr: JSONArray = Api.getArr("/api/messages/${Uri.encode(uid)}")
                 if (activeFriend != uid) return@launch
                 for (i in 0 until arr.length()) {
-                    val raw = parseMessage(arr.getJSONObject(i))
+                    val raw = parseMessage(arr.getJSONObject(i)).copy(history = true)
+                    if (System.currentTimeMillis() - raw.date >= RETENTION_MS) continue // ৩ দিনের পুরনো — দেখানো হবে না
                     try { addMessage(hydrateMessage(raw)) } catch (e: Exception) {
                         toast("এনক্রিপ্টেড মেসেজ খোলা যায়নি: ${e.message}")
                     }
@@ -423,6 +479,7 @@ object Session {
         activeFriend = null
         messages.clear()
         seenIds.clear()
+        loadedMedia.clear()
     }
 
     private suspend fun hydrateMessage(raw: ChatMessage): ChatMessage {

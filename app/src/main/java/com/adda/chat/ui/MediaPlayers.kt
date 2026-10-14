@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -195,8 +196,9 @@ fun VoiceMessagePlayer(url: String, mine: Boolean) {
 }
 
 /** ভিডিও মেসেজ কার্ড: থাম্বনেইল + প্লে বাটন; ট্যাপ করলে অ্যাপের ভেতরেই ফুল-স্ক্রিন প্লেয়ার */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun VideoMessageCard(url: String) {
+fun VideoMessageCard(url: String, onLongClick: () -> Unit = {}) {
     var show by remember { mutableStateOf(false) }
     var thumb by remember(url) { mutableStateOf<Bitmap?>(null) }
     var duration by remember(url) { mutableStateOf(0L) }
@@ -227,7 +229,7 @@ fun VideoMessageCard(url: String) {
         Modifier.width(220.dp).aspectRatio(ratio)
             .clip(RoundedCornerShape(18.dp))
             .background(Color(0xFF111827))
-            .clickable { show = true },
+            .combinedClickable(onClick = { show = true }, onLongClick = onLongClick),
         contentAlignment = Alignment.Center
     ) {
         if (bmp != null) {

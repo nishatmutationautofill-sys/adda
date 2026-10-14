@@ -1,19 +1,24 @@
 package com.adda.chat.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,12 +26,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.adda.chat.data.Session
 
-/** নিচের নেভিগেশনসহ মূল স্ক্রিন: চ্যাট / মানুষ / প্রোফাইল */
+/** মূল স্ক্রিন: বন্ধু তালিকা / আগ্রহী তালিকা — নিচে ভাসমান পিল নেভিগেশন */
 @Composable
 fun MainShell() {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -37,31 +47,42 @@ fun MainShell() {
         Box(Modifier.weight(1f)) {
             HomeScreen(tab = tab, onGoPeople = { tab = 1 })
         }
-        Surface(color = Color.White, shadowElevation = 12.dp) {
-            NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
-                val colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Accent, selectedTextColor = Accent, indicatorColor = Them,
-                    unselectedIconColor = Muted, unselectedTextColor = Muted
-                )
-                NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 }, colors = colors,
-                    icon = {
-                        BadgedBox(badge = { if (totalUnread > 0) Badge { Text(if (totalUnread > 99) "99+" else totalUnread.toString()) } }) {
-                            Icon(Icons.Filled.ChatBubble, contentDescription = "চ্যাট")
-                        }
-                    },
-                    label = { Text("চ্যাট") }
-                )
-                NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 }, colors = colors,
-                    icon = {
-                        BadgedBox(badge = { if (requestCount > 0) Badge { Text(requestCount.toString()) } }) {
-                            Icon(Icons.Filled.People, contentDescription = "মানুষ")
-                        }
-                    },
-                    label = { Text("মানুষ") }
-                )
+        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp)) {
+            Surface(
+                shape = RoundedCornerShape(34.dp),
+                color = Color.White,
+                shadowElevation = 20.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    NavPill(Icons.Filled.People, "বন্ধু", tab == 0, totalUnread, Modifier.weight(1f)) { tab = 0 }
+                    NavPill(Icons.Filled.PersonAdd, "আগ্রহী", tab == 1, requestCount, Modifier.weight(1f)) { tab = 1 }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun NavPill(icon: ImageVector, label: String, selected: Boolean, badge: Int, modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.clip(RoundedCornerShape(28.dp))
+            .background(if (selected) BubbleBrush else androidx.compose.ui.graphics.SolidColor(Color.Transparent))
+            .clickable(onClick = onClick)
+            .padding(vertical = 13.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BadgedBox(badge = {
+            if (badge > 0) Badge(containerColor = if (selected) Color.White else Danger, contentColor = if (selected) Danger else Color.White) {
+                Text(if (badge > 99) "99+" else badge.toString())
+            }
+        }) {
+            Icon(icon, contentDescription = label, tint = if (selected) Color.White else Muted, modifier = Modifier.size(24.dp))
+        }
+        if (selected) {
+            Spacer(Modifier.size(8.dp))
+            Text(label, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
         }
     }
 }

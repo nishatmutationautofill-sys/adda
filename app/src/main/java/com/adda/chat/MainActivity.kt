@@ -33,7 +33,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Android app windows are protected from system screenshots and screen recording.
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        enableEdgeToEdge()
+        // গ্রেডিয়েন্ট হেডারের ওপর স্ট্যাটাস বারের আইকন সাদা থাকবে
+        enableEdgeToEdge(statusBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         setContent {
             AddaTheme { AppRoot() }
         }

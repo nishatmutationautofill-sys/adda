@@ -13,6 +13,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.QrCode
@@ -32,6 +35,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -122,70 +127,97 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
     var friendUid by remember { mutableStateOf("") }
     var friendSearch by remember { mutableStateOf("") }
     var peopleTab by remember { mutableStateOf(0) }
+    var profilePopup by remember { mutableStateOf<ProfileInfo?>(null) }
     val filteredFriends = me.friends.filter { uid ->
         Session.displayName(uid).contains(friendSearch.trim(), ignoreCase = true) ||
             uid.contains(friendSearch.trim(), ignoreCase = true)
     }
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
-        // আধুনিক গ্রেডিয়েন্ট হেডার
-        Surface(color = Accent, shadowElevation = 6.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
-            Row(
-                Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding().padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = 20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-                    Text("A", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.size(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("আড্ডা Messenger", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                    Text(
-                        Session.connectionLabel,
-                        fontSize = 12.sp,
-                        color = if (Session.socketConnected) Color(0xFFB9FFE5) else Color.White.copy(alpha = 0.78f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color.White) }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
-                            menuOpen = false
-                            clipboard.setText(AnnotatedString(me.uid))
-                            Session.toast("আপনার আইডি কপি হয়েছে")
-                        })
-                        DropdownMenuItem(text = { Text("লগআউট") }, onClick = {
-                            menuOpen = false
-                            Session.logout()
-                        })
+        // গ্রেডিয়েন্ট হেডার — বন্ধু ট্যাবে নিজের বড় প্রোফাইল ছবি হেডারের ওপর ভেসে থাকে
+        Box(Modifier.fillMaxWidth().zIndex(1f)) {
+            Surface(color = Accent, shadowElevation = 6.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding()
+                        .padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = if (tab == 0) 64.dp else 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+                        Text("A", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
                     }
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("আড্ডা Messenger", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        Text(
+                            Session.connectionLabel,
+                            fontSize = 12.sp,
+                            color = if (Session.socketConnected) Color(0xFFB9FFE5) else Color.White.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color.White) }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
+                                menuOpen = false
+                                clipboard.setText(AnnotatedString(me.uid))
+                                Session.toast("আপনার আইডি কপি হয়েছে")
+                            })
+                            DropdownMenuItem(text = { Text("লগআউট") }, onClick = {
+                                menuOpen = false
+                                Session.logout()
+                            })
+                        }
+                    }
+                }
+            }
+            if (tab == 0) {
+                // ভেসে থাকা বড় প্রোফাইল ছবি (পপআপ স্টাইল): অর্ধেক হেডারে, অর্ধেক বাইরে
+                Box(
+                    Modifier.align(Alignment.BottomCenter).offset(y = 54.dp)
+                        .shadow(18.dp, CircleShape)
+                        .clip(CircleShape).background(Color.White).padding(5.dp)
+                        .clickable {
+                            profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Avatar(me.username, 108.dp, photoUrl = me.profilePhoto)
+                }
+                Box(
+                    Modifier.align(Alignment.BottomCenter).offset(x = 44.dp, y = 54.dp)
+                        .size(32.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(Accent)
+                        .border(2.dp, Color.White, CircleShape)
+                        .clickable { photoPicker.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "ছবি বদলান", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
         }
 
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = if (tab == 0) 0.dp else 18.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             when (tab) {
                 0 -> {
+            // ভেসে থাকা প্রোফাইল ছবির নিচের জায়গা + নাম
             item {
-                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(top = 66.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(me.username, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("বন্ধু তালিকা (${me.friends.size})", fontSize = 13.sp, color = Muted, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            item {
+                Surface(shape = RoundedCornerShape(26.dp), color = Color.White, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(56.dp).clickable { photoPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
-                                Avatar(me.username, 52.dp, photoUrl = me.profilePhoto)
-                                Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                }
-                            }
-                            Spacer(Modifier.size(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(me.username, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(me.uid, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("আমার আইডি", color = Muted, fontSize = 11.sp)
+                                Text(me.uid, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             IconButton(onClick = {
                                 clipboard.setText(AnnotatedString(me.uid))
@@ -234,11 +266,36 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                 }
             }
             // ---- চ্যাট ট্যাব: সাম্প্রতিক চ্যাট লিস্ট ----
+            // ---- স্টোরি-স্টাইল: এখন অনলাইনে থাকা বন্ধুরা ----
+            val onlineFriends = me.friends.filter { Session.online[it] == true }
+            if (onlineFriends.isNotEmpty()) {
+                item {
+                    Column {
+                        Text("এখন অনলাইনে 🟢", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Ink)
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            items(onlineFriends, key = { "story_$it" }) { uid ->
+                                Column(
+                                    Modifier.width(70.dp).clip(RoundedCornerShape(16.dp)).clickable { Session.openConversation(uid) },
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Avatar(Session.displayName(uid), 68.dp, photoUrl = Session.profilePhotos[uid], ring = true)
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(
+                                        Session.displayName(uid), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 OutlinedTextField(value = friendSearch, onValueChange = { friendSearch = it },
                     placeholder = { Text("নাম বা আইডি দিয়ে খুঁজুন") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Line, focusedContainerColor = Color.White, unfocusedContainerColor = Color.White))
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = Color.White, unfocusedContainerColor = Color.White))
             }
             val sortedFriends = filteredFriends.sortedWith(
                 compareByDescending<String> { Session.lastPreview[it]?.date ?: 0L }.thenBy { Session.displayName(it).lowercase() }
@@ -254,15 +311,24 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             } else if (sortedFriends.isEmpty()) {
                 item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
             }
-            items(sortedFriends, key = { "chat_$it" }) { uid -> ChatListRow(uid) }
+            items(sortedFriends, key = { "chat_$it" }) { uid ->
+                ChatListRow(uid, onAvatarClick = {
+                    profilePopup = ProfileInfo(uid, Session.displayName(uid), Session.profilePhotos[uid], online = Session.online[uid] == true)
+                })
+            }
                 }
                 else -> {
             if (me.requests.isNotEmpty()) {
                 item { Text("ফ্রেন্ড রিকুয়েস্ট (${me.requests.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
                 items(me.requests, key = { "req_$it" }) { uid ->
-                    Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
+                    Surface(shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(Session.displayName(uid), 44.dp)
+                            Avatar(
+                                Session.displayName(uid), 52.dp, photoUrl = Session.profilePhotos[uid],
+                                modifier = Modifier.clip(CircleShape).clickable {
+                                    profilePopup = ProfileInfo(uid, Session.displayName(uid), Session.profilePhotos[uid])
+                                }
+                            )
                             Spacer(Modifier.size(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(Session.displayName(uid), fontWeight = FontWeight.SemiBold, color = Ink)
@@ -277,13 +343,18 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             }
 
             // ---- মানুষ ট্যাব: বন্ধু হতে আগ্রহীরা ----
-            item { Text("যারা বন্ধু হতে আগ্রহী", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
+            item { Text("আগ্রহী তালিকা — যারা বন্ধু হতে আগ্রহী", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink) }
             val discoverList = Session.discoverableUsers.filter { it.uid !in me.friends && it.uid !in me.requests && it.uid != me.uid }
             if (discoverList.isEmpty()) item { Text("এখনো কেউ ‘বন্ধু চাই’ চালু করেননি।", color = Muted) }
             items(discoverList, key = { "discover_${it.uid}" }) { person ->
-                Surface(shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line), modifier = Modifier.fillMaxWidth()) {
+                Surface(shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(person.username, 46.dp, photoUrl = person.profilePhoto)
+                        Avatar(
+                            person.username, 56.dp, photoUrl = person.profilePhoto,
+                            modifier = Modifier.clip(CircleShape).clickable {
+                                profilePopup = ProfileInfo(person.uid, person.username, person.profilePhoto)
+                            }
+                        )
                         Spacer(Modifier.size(10.dp))
                         Column(Modifier.weight(1f)) { Text(person.username, fontWeight = FontWeight.SemiBold, color = Ink); Text(person.uid, color = Muted, fontSize = 12.sp) }
                         Button(onClick = { Session.sendFriendRequest(person.uid) {} }, shape = RoundedCornerShape(50)) { Text("বন্ধু হন") }
@@ -294,6 +365,14 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+    }
+
+    profilePopup?.let { info ->
+        ProfilePopup(
+            info = info,
+            onClose = { profilePopup = null },
+            onChangePhoto = if (info.isMe) ({ profilePopup = null; photoPicker.launch("image/*") }) else null
+        )
     }
 
     if (showMyQr) {
@@ -368,7 +447,7 @@ private fun formatChatTime(ms: Long): String {
 }
 
 @Composable
-private fun ChatListRow(uid: String) {
+private fun ChatListRow(uid: String, onAvatarClick: () -> Unit) {
     val unread = Session.unread[uid] ?: 0
     val last = Session.lastPreview[uid]
     val online = Session.online[uid] == true
@@ -378,11 +457,14 @@ private fun ChatListRow(uid: String) {
         else -> ""
     }
     Surface(
-        shape = RoundedCornerShape(18.dp), color = Color.White, border = BorderStroke(1.dp, Line),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { Session.openConversation(uid) }
+        shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).clickable { Session.openConversation(uid) }
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(Session.displayName(uid), 52.dp, online = online, photoUrl = Session.profilePhotos[uid])
+            Avatar(
+                Session.displayName(uid), 60.dp, online = online, photoUrl = Session.profilePhotos[uid],
+                modifier = Modifier.clip(CircleShape).clickable { onAvatarClick() }
+            )
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -401,7 +483,7 @@ private fun ChatListRow(uid: String) {
                 if (last != null) Text(formatChatTime(last.date), fontSize = 11.sp, color = if (unread > 0) Accent else Muted)
                 if (unread > 0) {
                     Spacer(Modifier.height(6.dp))
-                    Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 2.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.clip(CircleShape).background(BubbleBrush).padding(horizontal = 9.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                         Text(unread.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }

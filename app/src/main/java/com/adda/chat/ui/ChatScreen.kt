@@ -57,6 +57,18 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
@@ -107,6 +119,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var viewerUrl by remember { mutableStateOf<String?>(null) }
     var viewerSecure by remember { mutableStateOf(false) }
     var selectedDelete by remember { mutableStateOf<ChatMessage?>(null) }
+    var showProfile by remember { mutableStateOf(false) }
     var showEmojiPack by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -146,30 +159,33 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         if (Session.messages.isNotEmpty()) listState.animateScrollToItem(Session.messages.size - 1)
     }
 
-    Column(Modifier.fillMaxSize().background(Canvas).imePadding()) {
+    Column(Modifier.fillMaxSize().background(ChatBackdrop).imePadding()) {
         // হেডার
-        Surface(color = Color.White, shadowElevation = 2.dp) {
+        Surface(color = Accent, shadowElevation = 8.dp, shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)) {
             Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().background(BubbleBrush).statusBarsPadding().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { Session.closeConversation() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান", tint = Color.White)
                 }
-                Avatar(Session.displayName(uid), 40.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid])
+                Avatar(
+                    Session.displayName(uid), 46.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid],
+                    modifier = Modifier.clip(CircleShape).clickable { showProfile = true }
+                )
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         if (Session.online[uid] == true) "অনলাইন" else "অফলাইন",
                         fontSize = 12.sp,
-                        color = if (Session.online[uid] == true) Success else Muted
+                        color = if (Session.online[uid] == true) Color(0xFFB9FFE5) else Color.White.copy(alpha = 0.75f)
                     )
                 }
                 IconButton(onClick = { requestCallPermission("audio") { CallManager.startCall("audio", uid) } }) {
-                    Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Accent)
+                    Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Color.White)
                 }
                 IconButton(onClick = { requestCallPermission("video") { CallManager.startCall("video", uid) } }) {
-                    Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Accent)
+                    Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Color.White)
                 }
             }
         }
@@ -199,7 +215,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         mine = m.from == Session.me?.uid,
                         onOpenImage = { viewerUrl = it; viewerSecure = m.secure },
                         onDownload = { downloadFile(ctx, it, m.fileName) },
-                        onDelete = { selectedDelete = m }
+                        onMenu = { selectedDelete = m }
                     )
                 }
             }
@@ -241,7 +257,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         }
 
         // কম্পোজার
-        Surface(color = Color.White, shadowElevation = 10.dp) {
+        Surface(color = Color.White, shadowElevation = 14.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
@@ -339,14 +355,30 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     }
 
     selectedDelete?.let { target ->
-        AlertDialog(
-            onDismissRequest = { selectedDelete = null },
-            title = { Text("মেসেজ/ফাইল ডিলেট করবেন?") },
-            text = { Text(if (target.from == Session.me?.uid) "এটি আপনার এবং অপর পক্ষের চ্যাট থেকে মুছে যাবে।" else "এটি শুধু আপনার চ্যাট থেকে মুছে যাবে।") },
-            confirmButton = {
-                TextButton(onClick = { selectedDelete = null; Session.deleteMessage(target) }) { Text("ডিলেট") }
-            },
-            dismissButton = { TextButton(onClick = { selectedDelete = null }) { Text("বাতিল") } }
+        MessageActionSheet(
+            message = target,
+            mine = target.from == Session.me?.uid,
+            onDismiss = { selectedDelete = null },
+            onDeleteForMe = { selectedDelete = null; Session.deleteMessage(target, everyone = false) },
+            onDeleteForEveryone = { selectedDelete = null; Session.deleteMessage(target, everyone = true) },
+            onOpenExternal = { url ->
+                selectedDelete = null
+                val name = target.fileName.orEmpty()
+                val mime = if (isAudioFile(name)) "audio/*" else if (isVideoFile(name)) "video/*" else "*/*"
+                try {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: Exception) { downloadFile(ctx, url, target.fileName) }
+            }
+        )
+    }
+
+    if (showProfile) {
+        ProfilePopup(
+            info = ProfileInfo(
+                uid, Session.displayName(uid), Session.profilePhotos[uid],
+                online = Session.online[uid] == true
+            ),
+            onClose = { showProfile = false }
         )
     }
 
@@ -394,28 +426,62 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
 
 private val timeFormat = SimpleDateFormat("hh:mm a", Locale("bn", "BD"))
 
+/** শুধু ইমোজি দিয়ে তৈরি ছোট মেসেজ (১–৩টি ইমোজি) হলে সেটি বড় করে দেখানো হয় */
+private fun emojiOnlyCount(text: String): Int {
+    val t = text.trim()
+    if (t.isEmpty() || t.length > 60) return 0
+    val iter = android.icu.text.BreakIterator.getCharacterInstance()
+    iter.setText(t)
+    var count = 0
+    var start = iter.first()
+    var end = iter.next()
+    while (end != android.icu.text.BreakIterator.DONE) {
+        if (!isEmojiCluster(t.substring(start, end))) return 0
+        count++
+        if (count > 3) return 0
+        start = end
+        end = iter.next()
+    }
+    return count
+}
+
+private fun isEmojiCluster(c: String): Boolean {
+    if (c.isBlank()) return false
+    val cp = c.codePointAt(0)
+    // সাধারণ অক্ষর, সংখ্যা ও বিরামচিহ্ন ইমোজি নয়
+    if (cp < 0x80 || Character.isLetterOrDigit(cp)) return false
+    return cp in 0x1F000..0x1FAFF || cp in 0x2600..0x27BF || cp in 0x2300..0x23FF ||
+        cp in 0x2B00..0x2BFF || cp in 0x1F1E6..0x1F1FF ||
+        cp == 0x00A9 || cp == 0x00AE || cp == 0x203C || cp == 0x2049 || cp == 0x2122 ||
+        cp == 0x2139 || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit, onDelete: () -> Unit) {
+private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit, onMenu: () -> Unit) {
     val ctx = LocalContext.current
     Column(
-        Modifier.fillMaxWidth().combinedClickable(
-            onClick = {},
-            onLongClick = { if (mine) onDelete() }
-        ),
+        Modifier.fillMaxWidth(),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
         val shape = RoundedCornerShape(
-            topStart = 20.dp, topEnd = 20.dp,
-            bottomEnd = if (mine) 5.dp else 20.dp,
-            bottomStart = if (mine) 20.dp else 5.dp
+            topStart = 24.dp, topEnd = 24.dp,
+            bottomEnd = if (mine) 6.dp else 24.dp,
+            bottomStart = if (mine) 24.dp else 6.dp
         )
+        // মেসেজ/ফাইলে ট্যাপ বা লং-প্রেস করলে ডিলেট মেনু খোলে
+        val tapMenu = Modifier.combinedClickable(onClick = onMenu, onLongClick = onMenu)
         val bubbleModifier = Modifier
             .widthIn(max = 290.dp)
             .clip(shape)
             .let { if (mine) it.background(BubbleBrush) else it.background(Color.White).border(1.dp, Line, shape) }
 
-        if (m.isImage) {
+        // আগের (হিস্টরি) ছবি/ভিডিও: প্রথমে লোড হয় না, ব্লার কার্ড দেখায়; ট্যাপ করলে লোড হবে
+        val deferred = m.history && m.isVisualMedia && !m.secure && Session.loadedMedia[m.id] != true
+
+        if (deferred) {
+            DeferredMediaCard(m, onLoad = { Session.loadMedia(m.id) }, onMenu = onMenu)
+        } else if (m.isImage) {
             val url = Api.absoluteUrl(m.fileUrl.orEmpty())
             AsyncImage(
                 model = ImageRequest.Builder(ctx)
@@ -430,36 +496,27 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                     .clip(RoundedCornerShape(18.dp))
                     .background(Them)
                     .border(1.dp, Line, RoundedCornerShape(18.dp))
-                    .clickable { onOpenImage(url) }
+                    .combinedClickable(onClick = { onOpenImage(url) }, onLongClick = onMenu)
             )
         } else if (m.isFile && isAudioFile(m.fileName)) {
-            Box(bubbleModifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Box(bubbleModifier.then(tapMenu).padding(horizontal = 12.dp, vertical = 10.dp)) {
                 VoiceMessagePlayer(Api.absoluteUrl(m.fileUrl.orEmpty()), mine)
             }
         } else if (m.isFile && isVideoFile(m.fileName)) {
-            VideoMessageCard(Api.absoluteUrl(m.fileUrl.orEmpty()))
+            VideoMessageCard(Api.absoluteUrl(m.fileUrl.orEmpty()), onLongClick = onMenu)
         } else if (m.isFile) {
             val url = Api.absoluteUrl(m.fileUrl.orEmpty())
             val fileName = m.fileName ?: "ফাইল"
             val isAudio = fileName.endsWith(".m4a", true) || fileName.endsWith(".mp3", true) || fileName.endsWith(".aac", true) || fileName.endsWith(".wav", true) || fileName.endsWith(".ogg", true)
             val isVideo = fileName.endsWith(".mp4", true) || fileName.endsWith(".webm", true) || fileName.endsWith(".3gp", true) || fileName.endsWith(".mov", true)
-            Row(bubbleModifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(bubbleModifier.then(tapMenu).padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (mine) Color.White.copy(alpha = 0.22f) else Them),
                     contentAlignment = Alignment.Center
                 ) { Text(if (isAudio) "🎙️" else if (isVideo) "🎬" else "📎", fontSize = 20.sp) }
                 Spacer(Modifier.size(10.dp))
-                Column(Modifier.weight(1f).clickable {
-                    if (m.secure) {
-                        Toast.makeText(ctx, "সিকিউর ফাইল অ্যাপের বাইরে খোলা বা ডাউনলোড করা যাবে না", Toast.LENGTH_SHORT).show()
-                    } else {
-                        val mime = if (isAudio) "audio/*" else if (isVideo) "video/*" else "*/*"
-                        try {
-                            ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } catch (_: Exception) { onDownload(url) }
-                    }
-                }.padding(end = 8.dp)) {
+                Column(Modifier.weight(1f, fill = false).padding(end = 8.dp)) {
                     Text(fileName, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (mine) Color.White else Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     if (m.size > 0) Text("%.2f MB".format(m.size / 1024.0 / 1024.0),
@@ -472,8 +529,19 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                 }
             }
         } else {
-            Box(bubbleModifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
-                Text(m.text, color = if (mine) Color.White else Ink, fontSize = 16.sp, lineHeight = 22.sp)
+            val emojiCount = emojiOnlyCount(m.text)
+            if (emojiCount > 0) {
+                // ইমোজি একা পাঠালে বাবল ছাড়া বড় করে দেখানো হয়
+                Text(
+                    m.text.trim(),
+                    fontSize = when (emojiCount) { 1 -> 64.sp; 2 -> 48.sp; else -> 40.sp },
+                    lineHeight = when (emojiCount) { 1 -> 76.sp; 2 -> 58.sp; else -> 48.sp },
+                    modifier = tapMenu.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            } else {
+                Box(bubbleModifier.then(tapMenu).padding(horizontal = 14.dp, vertical = 9.dp)) {
+                    Text(m.text, color = if (mine) Color.White else Ink, fontSize = 16.sp, lineHeight = 22.sp)
+                }
             }
         }
         Text(
@@ -482,6 +550,130 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
             color = Muted,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
+    }
+}
+
+/** আগের ছবি/ভিডিওর ব্লার প্লেসহোল্ডার — আসল ফাইল ডাউনলোড হয় না; ট্যাপ করলে লোড হবে */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DeferredMediaCard(m: ChatMessage, onLoad: () -> Unit, onMenu: () -> Unit) {
+    val isVideo = m.isVideo
+    Box(
+        Modifier.width(220.dp).height(160.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFFB9BEDD), Color(0xFF8E96C4))))
+            .combinedClickable(onClick = onLoad, onLongClick = onMenu),
+        contentAlignment = Alignment.Center
+    ) {
+        // ব্লার করা রঙের ছোপ (শুধু সাজসজ্জা — আসল ছবি নয়)
+        Box(Modifier.size(110.dp).offset(x = (-50).dp, y = (-30).dp).blur(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.45f)))
+        Box(Modifier.size(90.dp).offset(x = 55.dp, y = 35.dp).blur(24.dp).clip(CircleShape).background(Color(0xFF5145F5).copy(alpha = 0.35f)))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(if (isVideo) Icons.Filled.Videocam else Icons.Filled.Image, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (isVideo) "ভিডিও" else "ছবি",
+                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.size(5.dp))
+                Text(
+                    if (m.size > 0) "লোড করুন · %.1f MB".format(m.size / 1024.0 / 1024.0) else "ট্যাপ করে লোড করুন",
+                    color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+/** মেসেজ/ফাইলে ট্যাপ করলে নিচ থেকে ওঠা ডিলেট মেনু */
+@Composable
+private fun MessageActionSheet(
+    message: ChatMessage,
+    mine: Boolean,
+    onDismiss: () -> Unit,
+    onDeleteForMe: () -> Unit,
+    onDeleteForEveryone: () -> Unit,
+    onOpenExternal: (String) -> Unit
+) {
+    val clipboard = LocalClipboardManager.current
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, securePolicy = SecureFlagPolicy.SecureOn)
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onDismiss() },
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Surface(
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                color = Color.White,
+                modifier = Modifier.fillMaxWidth()
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { }
+            ) {
+                Column(Modifier.navigationBarsPadding().padding(horizontal = 12.dp, vertical = 14.dp)) {
+                    Box(
+                        Modifier.align(Alignment.CenterHorizontally).width(40.dp).height(4.dp)
+                            .clip(RoundedCornerShape(50)).background(Line)
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    val label = when {
+                        message.isImage -> "ছবি"
+                        message.isVideo -> "ভিডিও"
+                        message.isFile -> "ফাইল"
+                        else -> "মেসেজ"
+                    }
+                    Text(
+                        label, color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    if (!message.isFile && message.text.isNotBlank()) {
+                        SheetRow(Icons.Filled.ContentCopy, "কপি করুন", Ink) {
+                            clipboard.setText(AnnotatedString(message.text))
+                            onDismiss()
+                        }
+                    }
+                    if (message.isFile && !message.secure && !message.isImage && !message.isVideo) {
+                        SheetRow(Icons.Filled.AttachFile, "খুলুন", Ink) { onOpenExternal(Api.absoluteUrl(message.fileUrl.orEmpty())) }
+                    }
+                    SheetRow(Icons.Filled.Delete, "শুধু আমার থেকে ডিলেট", Danger) { onDeleteForMe() }
+                    if (mine) {
+                        SheetRow(Icons.Filled.DeleteSweep, "উভয় দিক থেকে ডিলেট", Danger) { onDeleteForEveryone() }
+                    }
+                    Text(
+                        if (mine) "“উভয় দিক” বেছে নিলে বন্ধুর চ্যাট ও সার্ভার থেকেও মুছে যাবে।"
+                        else "এটি শুধু আপনার চ্যাট থেকে মুছবে; বন্ধুর কাছে থাকবে।",
+                        color = Muted, fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("বাতিল") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, tint: Color, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = tint)
+        Spacer(Modifier.size(14.dp))
+        Text(text, color = tint, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

@@ -1,6 +1,12 @@
 package com.adda.chat.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,103 +55,126 @@ fun AuthScreen() {
     var signup by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val canSubmit = !Session.busy && username.isNotBlank() && password.isNotEmpty()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Canvas)
-            .systemBarsPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(28.dp)).background(BubbleBrush),
-            contentAlignment = Alignment.Center
+    Box(Modifier.fillMaxSize().background(BubbleBrush)) {
+        // সাজসজ্জার ভাসমান ইমোজি ও রঙিন বৃত্ত
+        Box(Modifier.size(220.dp).offset(x = (-70).dp, y = (-60).dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f)))
+        Box(Modifier.align(Alignment.TopEnd).size(160.dp).offset(x = 50.dp, y = 120.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)))
+        Text("💬", fontSize = 34.sp, modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(start = 28.dp, top = 40.dp).alpha(0.55f))
+        Text("✨", fontSize = 30.sp, modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(end = 36.dp, top = 70.dp).alpha(0.65f))
+        Text("🎧", fontSize = 30.sp, modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(start = 70.dp, top = 130.dp).alpha(0.5f))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(Icons.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(43.dp))
-        }
-        Spacer(Modifier.height(14.dp))
-        Text("আড্ডা Messenger", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-        Text("বন্ধুত্ব • আড্ডা • কথা • সবসময়", color = Muted, fontSize = 13.sp)
-        Spacer(Modifier.height(24.dp))
+            Box(
+                modifier = Modifier.size(92.dp).shadow(20.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp)).background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("আ", fontSize = 52.sp, fontWeight = FontWeight.Black, color = Accent)
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("আড্ডা", fontSize = 38.sp, fontWeight = FontWeight.Black, color = Color.White)
+            Text("বন্ধুদের সাথে জমিয়ে আড্ডা 🔥", color = Color.White.copy(alpha = 0.92f), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(26.dp))
 
-        Surface(shape = RoundedCornerShape(28.dp), color = Color.White, shadowElevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(22.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ModeTab("লগইন", !signup, Modifier.weight(1f)) { signup = false }
-                    ModeTab("সাইন আপ", signup, Modifier.weight(1f)) { signup = true }
-                }
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("ইউজারনেম") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("পাসওয়ার্ড") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (Session.authError.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(Session.authError, color = Danger, fontSize = 13.sp)
-                }
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = { Session.authenticate(username, password, signup) },
-                    enabled = !Session.busy && username.isNotBlank() && password.isNotEmpty(),
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.fillMaxWidth().height(50.dp)
-                ) {
-                    if (Session.busy) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                    } else {
-                        Text(if (signup) "অ্যাকাউন্ট খুলুন" else "লগইন করুন", fontWeight = FontWeight.SemiBold)
+            Surface(shape = RoundedCornerShape(32.dp), color = Color.White, shadowElevation = 16.dp, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(22.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(Them).padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ModeTab("লগইন", !signup, Modifier.weight(1f)) { signup = false }
+                        ModeTab("সাইন আপ", signup, Modifier.weight(1f)) { signup = true }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    val fieldColors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent, unfocusedBorderColor = Line,
+                        focusedContainerColor = Color(0xFFFBF9FF), unfocusedContainerColor = Color(0xFFFBF9FF),
+                        focusedLabelColor = Accent
+                    )
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("ইউজারনেম") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("পাসওয়ার্ড") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (Session.authError.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(Session.authError, color = Danger, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Box(
+                        Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(50))
+                            .background(if (canSubmit) BubbleBrush else SolidColor(Line))
+                            .clickable(enabled = canSubmit) { Session.authenticate(username, password, signup) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (Session.busy) {
+                            CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text(
+                                if (signup) "অ্যাকাউন্ট খুলুন 🚀" else "লগইন করুন",
+                                fontWeight = FontWeight.ExtraBold, fontSize = 16.sp,
+                                color = if (canSubmit) Color.White else Muted
+                            )
+                        }
                     }
                 }
             }
+            Spacer(Modifier.height(16.dp))
+            Text(Session.connectionLabel, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
         }
-        Spacer(Modifier.height(16.dp))
-        Text(Session.connectionLabel, color = Muted, fontSize = 12.sp)
     }
 }
 
 @Composable
 private fun ModeTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(50),
-        colors = ButtonDefaults.textButtonColors(
-            containerColor = if (selected) Accent else Them,
-            contentColor = if (selected) Color.White else Ink
-        )
+    Box(
+        modifier.clip(RoundedCornerShape(50))
+            .background(if (selected) BubbleBrush else SolidColor(Color.Transparent))
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(label, fontWeight = FontWeight.SemiBold)
+        Text(label, fontWeight = FontWeight.ExtraBold, color = if (selected) Color.White else Muted)
     }
 }
 
 @Composable
 fun LoadingScreen() {
     Column(
-        modifier = Modifier.fillMaxSize().background(Canvas).systemBarsPadding().padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(BubbleBrush).systemBarsPadding().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        CircularProgressIndicator(color = Accent)
+        CircularProgressIndicator(color = Color.White)
         Spacer(Modifier.height(16.dp))
-        Text(Session.connectionLabel, color = Muted)
+        Text(Session.connectionLabel, color = Color.White)
         Spacer(Modifier.height(16.dp))
-        TextButton(onClick = { Session.logout() }) { Text("লগআউট") }
+        TextButton(onClick = { Session.logout() }) { Text("লগআউট", color = Color.White) }
     }
 }

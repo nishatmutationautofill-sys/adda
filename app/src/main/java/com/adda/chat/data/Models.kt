@@ -31,14 +31,21 @@ data class ChatMessage(
     val envelope: String? = null,
     val secure: Boolean = false,
     val ttlSeconds: Int = 0,
-    val expiresAt: Long = 0L
+    val expiresAt: Long = 0L,
+    /** চ্যাট খোলার সময় সার্ভার থেকে আসা আগের মেসেজ (লাইভ নয়) — ছবি/ভিডিও ব্লার থাকবে, ট্যাপে লোড হবে */
+    val history: Boolean = false
 ) {
     val isFile: Boolean get() = type == "file" && !fileUrl.isNullOrEmpty()
     val isImage: Boolean
         get() = isFile && IMAGE_REGEX.containsMatchIn(fileName?.takeIf { it.isNotEmpty() } ?: fileUrl.orEmpty())
 
+    val isVideo: Boolean
+        get() = isFile && VIDEO_REGEX.containsMatchIn(fileName?.takeIf { it.isNotEmpty() } ?: fileUrl.orEmpty())
+    val isVisualMedia: Boolean get() = isImage || isVideo
+
     companion object {
         private val IMAGE_REGEX = Regex("\\.(jpe?g|png|gif|webp|bmp|avif)$", RegexOption.IGNORE_CASE)
+        private val VIDEO_REGEX = Regex("\\.(mp4|webm|3gp|mov|mkv|m4v)$", RegexOption.IGNORE_CASE)
     }
 }
 

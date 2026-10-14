@@ -16,15 +16,17 @@ android {
         versionName = System.getenv("VERSION_NAME") ?: "1.0"
         // শুধু বাংলা ও ইংরেজি রিসোর্স রাখা (লাইব্রেরির বাকি ভাষা বাদ)
         resourceConfigurations += listOf("en", "bn")
+        // x86/x86_64 বাদ দিয়ে শুধু দুই ধরনের মোবাইল CPU রাখা (ফাইল সাইজ কম রাখতে)
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
-    // প্রতি CPU-র জন্য আলাদা ছোট APK: নতুন ফোনে arm64-v8a, পুরনো/সস্তা ফোনে armeabi-v7a
+    // একটাই APK ফাইল: arm64-v8a (নতুন ফোন) ও armeabi-v7a (পুরনো/সস্তা ফোন) — দুটোর native লাইব্রেরি একই ফাইলে থাকে।
+    // ফোন নিজে থেকে নিজের CPU-র উপযোগী লাইব্রেরি বেছে নেয়, তাই দুই ধরনের মোবাইলে একই APK ইনস্টল হয়।
     splits {
         abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
+            isEnable = false
         }
     }
 
