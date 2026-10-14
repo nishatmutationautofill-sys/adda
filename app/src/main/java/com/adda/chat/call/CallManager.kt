@@ -1,16 +1,23 @@
 package com.adda.chat.call
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
-import android.media.Ringtone
+import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.adda.chat.data.Session
+import com.adda.chat.service.ConnectionService
 import com.adda.chat.util.Notifier
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
@@ -79,7 +86,12 @@ object CallManager {
 
     private var pendingOffer: JSONObject? = null
     private val pendingCandidates = mutableListOf<IceCandidate>()
-    private var ringtone: Ringtone? = null
+    private var ringPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
+    private var ringbackTone: ToneGenerator? = null
+    private var timeoutJob: Job? = null
+    private const val OUTGOING_TIMEOUT_MS = 45_000L
+    private const val INCOMING_TIMEOUT_MS = 50_000L
     private var prevAudioMode = AudioManager.MODE_NORMAL
 
     fun init(context: Context) {
@@ -235,6 +247,8 @@ object CallManager {
 
     private fun markConnected() {
         if (phase == Phase.None || phase == Phase.Connected) return
+        stopRingback()
+        cancelTimeout()
         phase = Phase.Connected
         connectedAt = SystemClock.elapsedRealtime()
         status = "কল সংযুক্ত হয়েছে"
@@ -260,6 +274,9 @@ object CallManager {
                 status = "কল করা হচ্ছে: ${Session.displayName(peer)}"
                 resetControls()
                 startAudioMode()
+                startRingback()
+                startOutgoingTimeout()
+                ConnectionService.setCallState(ctx, true, callKind == "video")
                 val p = createPeerAndMedia(callKind)
                 val offer = p.createOfferSuspend()
                 p.setLocalSuspend(offer)
@@ -292,6 +309,7 @@ object CallManager {
         resetControls()
         status = if (callKind == "video") "ভিডিও কল আসছে" else "অডিও কল আসছে"
         startRingtone()
+        startIncomingTimeout()
         if (!Session.appInForeground) {
             Notifier.incomingCall(ctx, Session.displayName(from), callKind == "video")
         }
@@ -300,7 +318,9 @@ object CallManager {
     fun acceptCall() {
         val offerData = pendingOffer ?: return
         stopRingtone()
+        cancelTimeout()
         Notifier.cancelCall(ctx)
+        ConnectionService.setCallState(ctx, true, callKind == "video")
         Session.scope.launch {
             try {
                 phase = Phase.Connecting
@@ -343,6 +363,8 @@ object CallManager {
             "answer" -> {
                 if (phase == Phase.None || from != peerUid) return
                 val answer = data.optJSONObject("answer") ?: return
+                stopRingback()
+                cancelTimeout()
                 Session.scope.launch {
                     try {
                         pc?.setRemoteSuspend(SessionDescription(SessionDescription.Type.ANSWER, answer.getString("sdp")))
@@ -368,6 +390,9 @@ object CallManager {
             }
             "hangup" -> {
                 if (phase == Phase.None || from != peerUid) return
+                if (phase == Phase.Incoming) {
+                    Notifier.missedCall(ctx, Session.displayName(from), callKind == "video")
+                }
                 val msg = when (data.optString("reason")) {
                     "declined" -> "কলটি রিসিভ করা হয়নি (কল রিজেক্ট করা হয়েছে)"
                     "busy" -> "অপর পক্ষ ব্যস্ত আছেন"
@@ -421,9 +446,14 @@ object CallManager {
         if (notifyPeer && phase != Phase.None && peerUid.isNotEmpty()) {
             Session.emit("webrtc:hangup", JSONObject().put("to", peerUid))
         }
+        val wasOutgoing = phase == Phase.Outgoing
         stopRingtone()
+        stopRingback()
+        cancelTimeout()
         Notifier.cancelCall(ctx)
         stopAudioMode()
+        ConnectionService.setCallState(ctx, false, false)
+        if (phase != Phase.None) playEndTone(wasOutgoing)
 
         val oldPc = pc
         val oldCapturer = capturer
@@ -481,19 +511,114 @@ object CallManager {
         speakerOn = false
     }
 
+    // ---- ইনকামিং রিংটোন (লুপ) + ভাইব্রেশন ----
+    @Suppress("DEPRECATION")
     private fun startRingtone() {
+        stopRingtone()
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val mode = am.ringerMode
+        if (mode == AudioManager.RINGER_MODE_SILENT) return
+        if (mode == AudioManager.RINGER_MODE_NORMAL) {
+            try {
+                val uri = RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_RINGTONE)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                val mp = MediaPlayer()
+                mp.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                mp.setDataSource(ctx, uri)
+                mp.isLooping = true
+                mp.prepare()
+                mp.start()
+                ringPlayer = mp
+            } catch (_: Exception) {
+                ringPlayer = null
+            }
+        }
+        // নরমাল ও ভাইব্রেট মোড — দুটোতেই ভাইব্রেশন
         try {
-            val r = RingtoneManager.getRingtone(ctx, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
-            if (Build.VERSION.SDK_INT >= 28) r?.isLooping = true
-            r?.play()
-            ringtone = r
+            val v = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            val pattern = longArrayOf(0, 900, 900)
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    v.vibrate(VibrationEffect.createWaveform(pattern, 0))
+                } else {
+                    v.vibrate(pattern, 0)
+                }
+                vibrator = v
+            }
         } catch (_: Exception) {
         }
     }
 
     private fun stopRingtone() {
-        try { ringtone?.stop() } catch (_: Exception) {}
-        ringtone = null
+        try { ringPlayer?.stop() } catch (_: Exception) {}
+        try { ringPlayer?.release() } catch (_: Exception) {}
+        ringPlayer = null
+        try { vibrator?.cancel() } catch (_: Exception) {}
+        vibrator = null
+    }
+
+    // ---- আউটগোয়িং ডায়ালিং/রিংব্যাক টোন (কানের স্পিকারে, ফোনকলের মতো) ----
+    private fun startRingback() {
+        stopRingback()
+        try {
+            val t = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70)
+            t.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            ringbackTone = t
+        } catch (_: Exception) {
+            ringbackTone = null
+        }
+    }
+
+    private fun stopRingback() {
+        try { ringbackTone?.stopTone() } catch (_: Exception) {}
+        try { ringbackTone?.release() } catch (_: Exception) {}
+        ringbackTone = null
+    }
+
+    /** কল শেষের ছোট বিপ; কেউ ধরেনি/রিজেক্ট করলে busy টোন */
+    private fun playEndTone(wasOutgoing: Boolean) {
+        try {
+            val t = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 60)
+            t.startTone(if (wasOutgoing) ToneGenerator.TONE_SUP_BUSY else ToneGenerator.TONE_PROP_PROMPT, 400)
+            Session.scope.launch {
+                delay(700)
+                try { t.release() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    // ---- কেউ না ধরলে স্বয়ংক্রিয়ভাবে কল শেষ ----
+    private fun cancelTimeout() {
+        timeoutJob?.cancel()
+        timeoutJob = null
+    }
+
+    private fun startOutgoingTimeout() {
+        cancelTimeout()
+        timeoutJob = Session.scope.launch {
+            delay(OUTGOING_TIMEOUT_MS)
+            if (phase == Phase.Outgoing) {
+                Session.toast("${Session.displayName(peerUid)} কল ধরেননি")
+                endCall(true)
+            }
+        }
+    }
+
+    private fun startIncomingTimeout() {
+        cancelTimeout()
+        timeoutJob = Session.scope.launch {
+            delay(INCOMING_TIMEOUT_MS)
+            if (phase == Phase.Incoming) {
+                Notifier.missedCall(ctx, Session.displayName(peerUid), callKind == "video")
+                endCall(false)
+            }
+        }
     }
 
     private fun sdpJson(d: SessionDescription): JSONObject =

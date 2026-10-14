@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.adda.chat.call.CallManager
+import com.adda.chat.service.ConnectionService
 import com.adda.chat.util.FileUpload
 import com.adda.chat.util.Notifier
 import io.socket.client.Ack
@@ -44,6 +45,8 @@ object Session {
     var authError by mutableStateOf("")
     var activeFriend by mutableStateOf<String?>(null)
     var toastMsg by mutableStateOf<ToastMsg?>(null)
+    /** MainActivity.onStart এ বাড়ে — অনুমতির ডায়ালগ আবার যাচাই করতে */
+    var startTick by mutableStateOf(0)
 
     val names = mutableStateMapOf<String, String>()
     val online = mutableStateMapOf<String, Boolean>()
@@ -123,8 +126,21 @@ object Session {
     }
 
     private suspend fun enterMessenger() {
+        ConnectionService.start(appContext)
         refreshPeople()
         connectSocket()
+    }
+
+    /** নেট ফিরলে বা সার্ভিস জাগলে: সকেট বিচ্ছিন্ন থাকলে সাথে সাথে আবার যুক্ত করে */
+    fun ensureConnected() {
+        if (Api.token.isEmpty() || Api.serverUrl.isEmpty()) return
+        if (me == null) {
+            restoreSession()
+            return
+        }
+        val s = socket
+        if (s == null) connectSocket()
+        else if (!socketConnected) s.connect()
     }
 
     private fun clearToken() {
@@ -165,7 +181,9 @@ object Session {
     }
 
     fun logout() {
+        clearToken() // আগে টোকেন মুছি, যাতে কল শেষ হওয়ার সময় সার্ভিস আবার শুরু না হয়
         CallManager.endCall(true)
+        ConnectionService.stop(appContext)
         socket?.let { it.off(); it.disconnect(); it.close() }
         socket = null
         socketConnected = false
@@ -354,12 +372,14 @@ object Session {
             scope.launch {
                 socketConnected = true
                 connectionLabel = "● সংযুক্ত"
+                ConnectionService.refreshNotification(appContext, CallManager.phase != CallManager.Phase.None)
             }
         }
         s.on(Socket.EVENT_DISCONNECT) {
             scope.launch {
                 socketConnected = false
                 connectionLabel = "সংযোগ বিচ্ছিন্ন"
+                ConnectionService.refreshNotification(appContext, CallManager.phase != CallManager.Phase.None)
             }
         }
         s.on(Socket.EVENT_CONNECT_ERROR) { args ->
