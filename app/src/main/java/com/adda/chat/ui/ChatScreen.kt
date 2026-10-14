@@ -88,6 +88,7 @@ import com.adda.chat.data.Session
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.ExperimentalFoundationApi
 
 @Composable
 fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit) {
