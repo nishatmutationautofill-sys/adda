@@ -545,12 +545,15 @@ object Session {
         }
         scope.launch {
             try {
-                val peer = peerE2eePublicKey(to)
-                val payload = JSONObject().put("text", text).toString()
-                val encrypted = E2ee.encryptText(payload, me?.uid ?: throw IllegalStateException("লগইন নেই"), to, peer)
+                val wireText = if (secure) {
+                    // শুধু Secure Me চালু থাকলে এনক্রিপ্ট হবে
+                    val peer = peerE2eePublicKey(to)
+                    val payload = JSONObject().put("text", text).toString()
+                    E2ee.encryptText(payload, me?.uid ?: throw IllegalStateException("লগইন নেই"), to, peer)
+                } else text
                 val data = JSONObject()
                     .put("to", to)
-                    .put("text", encrypted)
+                    .put("text", wireText)
                     .put("secure", secure)
                     .put("ttlSeconds", ttlSeconds.coerceIn(1, 60))
                 s.emit("chat:send", data, Ack { args ->
@@ -607,23 +610,32 @@ object Session {
                     withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
                 }
                 if (prepared.size > 50L * 1024 * 1024) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
-                mediaUploadLabel = "ফাইল এনক্রিপ্ট হচ্ছে…"
-                val plainBytes = withContext(Dispatchers.IO) {
-                    val buffer = Buffer()
-                    prepared.body.writeTo(buffer)
-                    buffer.readByteArray().also { buffer.clear() }
+                val multipart = if (secure) {
+                    // শুধু Secure Me চালু থাকলে এনক্রিপ্ট হবে
+                    mediaUploadLabel = "ফাইল এনক্রিপ্ট হচ্ছে…"
+                    val plainBytes = withContext(Dispatchers.IO) {
+                        val buffer = Buffer()
+                        prepared.body.writeTo(buffer)
+                        buffer.readByteArray().also { buffer.clear() }
+                    }
+                    if (plainBytes.size > 50L * 1024 * 1024 - 16) throw IllegalArgumentException("এনক্রিপশনসহ ফাইলটি ৫০ MB ছাড়িয়ে যাচ্ছে")
+                    val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
+                    val peer = peerE2eePublicKey(to)
+                    val senderUid = me?.uid ?: throw IllegalStateException("লগইন নেই")
+                    val encrypted = withContext(Dispatchers.Default) { E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime) }
+                    val encryptedBody = encrypted.bytes.toRequestBody("application/octet-stream".toMediaType())
+                    MultipartBody.Builder().setType(MultipartBody.FORM)
+                        .addFormDataPart("file", "encrypted.bin", encryptedBody)
+                        .addFormDataPart("to", to).addFormDataPart("encrypted", "true")
+                        .addFormDataPart("envelope", encrypted.envelope).addFormDataPart("secure", "true")
+                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
+                } else {
+                    MultipartBody.Builder().setType(MultipartBody.FORM)
+                        .addFormDataPart("file", prepared.name, prepared.body)
+                        .addFormDataPart("to", to).addFormDataPart("encrypted", "false")
+                        .addFormDataPart("secure", "false")
+                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
                 }
-                if (plainBytes.size > 50L * 1024 * 1024 - 16) throw IllegalArgumentException("এনক্রিপশনসহ ফাইলটি ৫০ MB ছাড়িয়ে যাচ্ছে")
-                val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
-                val peer = peerE2eePublicKey(to)
-                val senderUid = me?.uid ?: throw IllegalStateException("লগইন নেই")
-                val encrypted = withContext(Dispatchers.Default) { E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime) }
-                val encryptedBody = encrypted.bytes.toRequestBody("application/octet-stream".toMediaType())
-                val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
-                    .addFormDataPart("file", "encrypted.bin", encryptedBody)
-                    .addFormDataPart("to", to).addFormDataPart("encrypted", "true")
-                    .addFormDataPart("envelope", encrypted.envelope).addFormDataPart("secure", secure.toString())
-                    .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
                 mediaUploadLabel = "আপলোড হচ্ছে…"
                 val total = multipart.contentLength().coerceAtLeast(1L)
                 val progressBody = object : okhttp3.RequestBody() {
@@ -645,7 +657,7 @@ object Session {
                 val resp = Api.request("POST", "/api/messages/file", body = progressBody)
                 val raw = parseMessage(JSONObject(resp))
                 addMessage(hydrateMessage(raw))
-                toast(if (secure) "সিকিউর ফাইল পাঠানো হয়েছে" else "এনক্রিপ্টেড ফাইল পাঠানো হয়েছে")
+                toast(if (secure) "সিকিউর ফাইল পাঠানো হয়েছে" else "ফাইল পাঠানো হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }
             catch (e: IllegalArgumentException) { toast(e.message) }
             catch (e: Exception) { toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}") }

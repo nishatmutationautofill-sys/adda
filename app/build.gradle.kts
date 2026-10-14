@@ -14,6 +14,18 @@ android {
         targetSdk = 34
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = System.getenv("VERSION_NAME") ?: "1.0"
+        // শুধু বাংলা ও ইংরেজি রিসোর্স রাখা (লাইব্রেরির বাকি ভাষা বাদ)
+        resourceConfigurations += listOf("en", "bn")
+    }
+
+    // প্রতি CPU-র জন্য আলাদা ছোট APK: নতুন ফোনে arm64-v8a, পুরনো/সস্তা ফোনে armeabi-v7a
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
     }
 
     // একটাই ফিক্সড ডিবাগ কী: প্রতি বিল্ডের APK একই সইয়ে হয়, তাই পুরনো অ্যাপের ওপর আপডেট ইনস্টল হয়
@@ -31,7 +43,9 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // সরাসরি ইনস্টল করার জন্য ডিবাগ কী দিয়েই সই করা (Play Store এর জন্য নিজের কী লাগবে)
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -48,7 +62,14 @@ android {
         compose = true
     }
     packaging {
+        // native লাইব্রেরি APK-র ভেতরে কমপ্রেস থাকবে → ডাউনলোড/ফাইল সাইজ ছোট
+        jniLibs { useLegacyPackaging = true }
         resources {
+            excludes += "/kotlin/**"
+            excludes += "kotlin-tooling-metadata.json"
+            excludes += "DebugProbesKt.bin"
+            excludes += "/META-INF/*.version"
+            excludes += "/META-INF/proguard/**"
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
         }
