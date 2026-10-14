@@ -17,6 +17,7 @@ import okio.BufferedSink
 import okio.source
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -32,15 +33,35 @@ object FileUpload {
         val cr = ctx.contentResolver
         var name = "file"
         var size = -1L
-        cr.query(uri, null, null, null, null)?.use { c ->
-            if (c.moveToFirst()) {
-                val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val si = c.getColumnIndex(OpenableColumns.SIZE)
-                if (ni >= 0) name = c.getString(ni) ?: name
-                if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+        if (uri.scheme == "file") {
+            val file = uri.path?.let(::File)
+            if (file != null) {
+                name = file.name
+                size = file.length()
+            }
+        } else {
+            cr.query(uri, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val si = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (ni >= 0) name = c.getString(ni) ?: name
+                    if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+                }
             }
         }
-        val mime = cr.getType(uri) ?: "application/octet-stream"
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val fallbackMime = when (ext) {
+            "m4a" -> "audio/mp4"
+            "mp3" -> "audio/mpeg"
+            "aac" -> "audio/aac"
+            "wav" -> "audio/wav"
+            "ogg" -> "audio/ogg"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            "3gp" -> "video/3gpp"
+            else -> "application/octet-stream"
+        }
+        val mime = cr.getType(uri) ?: fallbackMime
         if (size > MAX_BYTES) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
 
         if (mime.startsWith("image/") && !mime.contains("gif") && !mime.contains("svg")) {

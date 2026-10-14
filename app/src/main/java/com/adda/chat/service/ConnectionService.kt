@@ -17,10 +17,12 @@ import androidx.core.content.ContextCompat
 import com.adda.chat.data.Session
 import com.adda.chat.util.Notifier
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 
 /**
- * অ্যাপ বন্ধ করলেও (রিসেন্ট থেকে সরালেও) প্রসেস বাঁচিয়ে রাখে, যাতে Socket.IO সংযোগ চালু থাকে
- * এবং মেসেজ/কল সাথে সাথে পৌঁছায়। একটি স্থায়ী (কমে-ভরা) নোটিফিকেশন দেখায় — Android এ এটা বাধ্যতামূলক।
+ * অ্যাপ ব্যাকগ্রাউন্ডে থাকলে Socket.IO সংযোগ সচল রাখার চেষ্টা করে।
+ * Android-এ foreground service-এর স্থায়ী notification দেখানো বাধ্যতামূলক।
  */
 class ConnectionService : Service() {
 
@@ -28,6 +30,7 @@ class ConnectionService : Service() {
     private var callVideo = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    private var watchdogJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -37,6 +40,7 @@ class ConnectionService : Service() {
         Notifier.init(applicationContext)
         acquireWakeLock()
         registerNetworkWatcher()
+        startConnectionWatchdog()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -51,7 +55,38 @@ class ConnectionService : Service() {
             return START_NOT_STICKY
         }
         Session.scope.launch { Session.ensureConnected() }
+        startConnectionWatchdog()
         return START_STICKY
+    }
+
+    /**
+     * Android/OEM ব্যাকগ্রাউন্ডে Socket.IO সংযোগ থামিয়ে দিতে পারে।
+     * Foreground service চলাকালে নিয়মিত সংযোগ যাচাই করে পুনরায় সংযোগের চেষ্টা করি।
+     */
+    private fun startConnectionWatchdog() {
+        if (watchdogJob?.isActive == true) return
+        watchdogJob = Session.scope.launch {
+            while (running) {
+                if (Session.hasToken) {
+                    try {
+                        Session.ensureConnected()
+                    } catch (_: Exception) {
+                        // পরের watchdog cycle-এ আবার চেষ্টা হবে
+                    }
+                }
+                delay(10_000)
+            }
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // রিসেন্ট অ্যাপস থেকে সরানো হলেও সার্ভিসটি চালু রাখার চেষ্টা।
+        if (Session.hasToken) {
+            Session.scope.launch { Session.ensureConnected() }
+            // stopWithTask=false এবং START_STICKY-এর পাশাপাশি সার্ভিসের restart request।
+            try { startService(Intent(applicationContext, ConnectionService::class.java)) } catch (_: Exception) { }
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun granted(p: String) =
@@ -97,7 +132,20 @@ class ConnectionService : Service() {
             val cb = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     // নেট ফিরলেই সাথে সাথে সকেট আবার যুক্ত করি
+                    Session.scope.launch {
+                        delay(1_000)
+                        Session.ensureConnected()
+                    }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: android.net.NetworkCapabilities) {
                     Session.scope.launch { Session.ensureConnected() }
+                }
+
+                override fun onLost(network: Network) {
+                    Session.socketConnected = false
+                    Session.connectionLabel = "ইন্টারনেট সংযোগ বিচ্ছিন্ন"
+                    refreshNotification(applicationContext, inCall)
                 }
             }
             cm.registerDefaultNetworkCallback(cb)
@@ -108,6 +156,8 @@ class ConnectionService : Service() {
 
     override fun onDestroy() {
         running = false
+        watchdogJob?.cancel()
+        watchdogJob = null
         try {
             netCallback?.let {
                 (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it)
@@ -118,6 +168,7 @@ class ConnectionService : Service() {
         try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
         wakeLock = null
         super.onDestroy()
+        // লগইন থাকলে Android-এর sticky restart mechanism-কে কাজে লাগাতে START_STICKY বজায় থাকে।
     }
 
     companion object {

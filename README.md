@@ -36,3 +36,24 @@ HTML/WebView নয় — পুরোপুরি নেটিভ Kotlin অ�
 - সার্ভারের বাইরে TURN সার্ভার না থাকলে কিছু মোবাইল নেটওয়ার্কে কল সংযোগ নাও হতে পারে।
 - `io.getstream:stream-webrtc-android:1.1.1` ডিপেন্ডেন্সি না পেলে `app/build.gradle.kts` এ সর্বশেষ ভার্সন বসান।
 - Android Studio তে খুললে Gradle ওয়্যাপার না থাকায় Studio নিজের Gradle ব্যবহার করতে বলবে (Gradle 8.9 / JDK 17)।
+
+
+## Friend search and background connection
+
+- The friend list has a search field that filters by friend username or UID.
+- A foreground connection service, persistent notification, wake lock, network callbacks,
+  Socket.IO reconnection, and a 10-second connection watchdog are used to improve background reliability.
+- Android cannot guarantee a process or network socket will remain alive under every condition.
+  Force Stop, vendor battery managers, revoked permissions, no network, and server downtime can still disconnect it.
+  For best results, allow notifications and set the app battery usage to Unrestricted / Don't optimize.
+
+
+## Chat media features added
+
+- In-chat download button uses Android Download Manager and saves attachments to Downloads.
+- Camera button opens the device camera app and requests a maximum 60-second clip; selected/recorded clip is sent through the existing `/api/messages/file` endpoint.
+- Microphone button records AAC/M4A voice notes and uploads them as attachments.
+- Emoji picker includes a built-in starter set and imports JSON packs. Sample pack: `sample-emoji-pack/adda-starter-emoji-pack.json`.
+- Emoji pack JSON schema: `{ "name": "My pack", "version": 1, "emojis": ["😀", "❤️"] }`.
+
+Media sending depends on the current server's `/api/messages/file` endpoint and its 50 MB upload limit. Video capture limits are also subject to the camera app/device. Voice recording requires microphone permission.

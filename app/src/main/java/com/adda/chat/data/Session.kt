@@ -139,8 +139,16 @@ object Session {
             return
         }
         val s = socket
-        if (s == null) connectSocket()
-        else if (!socketConnected) s.connect()
+        if (s == null) {
+            connectSocket()
+        } else if (!s.connected()) {
+            // UI state এবং Socket.IO engine state কখনও সাময়িকভাবে আলাদা হতে পারে।
+            // প্রকৃত socket সংযোগ নেই হলেই পুনরায় connect() করি।
+            try { s.connect() } catch (_: Exception) { }
+        } else {
+            socketConnected = true
+            connectionLabel = "● সংযুক্ত"
+        }
     }
 
     private fun clearToken() {

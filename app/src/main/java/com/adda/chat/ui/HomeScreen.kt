@@ -54,6 +54,11 @@ fun HomeScreen() {
     val clipboard = LocalClipboardManager.current
     var menuOpen by remember { mutableStateOf(false) }
     var friendUid by remember { mutableStateOf("") }
+    var friendSearch by remember { mutableStateOf("") }
+    val filteredFriends = me.friends.filter { uid ->
+        Session.displayName(uid).contains(friendSearch.trim(), ignoreCase = true) ||
+            uid.contains(friendSearch.trim(), ignoreCase = true)
+    }
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
         // হেডার
@@ -159,12 +164,25 @@ fun HomeScreen() {
                 }
             }
 
-            // বন্ধুদের তালিকা
-            item { Text("বন্ধুরা", fontWeight = FontWeight.Bold, color = Ink) }
+            // বন্ধুদের তালিকা ও সার্চ
+            item {
+                Text("বন্ধুরা (${me.friends.size})", fontWeight = FontWeight.Bold, color = Ink)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = friendSearch,
+                    onValueChange = { friendSearch = it },
+                    placeholder = { Text("নাম বা আইডি দিয়ে বন্ধু খুঁজুন") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
             if (me.friends.isEmpty()) {
                 item { Text("এখনো কাউকে যোগ করেননি", color = Muted) }
+            } else if (filteredFriends.isEmpty()) {
+                item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
             }
-            items(me.friends, key = { "fr_$it" }) { uid ->
+            items(filteredFriends, key = { "fr_$it" }) { uid ->
                 val unread = Session.unread[uid] ?: 0
                 Surface(
                     shape = RoundedCornerShape(16.dp),
