@@ -103,6 +103,23 @@ object Api {
     suspend fun getArr(endpoint: String) = JSONArray(request("GET", endpoint))
     suspend fun postObj(endpoint: String, json: JSONObject) = JSONObject(request("POST", endpoint, json = json))
 
+    /** Firestore REST থেকে appConfig/runtime ডকুমেন্টের APK URL আনে; না পেলে null। */
+    suspend fun fetchApkUrl(): String? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://firestore.googleapis.com/v1/projects/$FIREBASE_PROJECT/databases/(default)/documents/appConfig/runtime?key=$FIREBASE_API_KEY"
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val fields = JSONObject(response.body?.string().orEmpty())
+                    .optJSONObject("fields") ?: return@use null
+                fields.optJSONObject("apkUrl")?.optString("stringValue")
+                    ?.trim()
+                    ?.takeIf { it.startsWith("https://", ignoreCase = true) }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** Firestore REST দিয়ে সার্ভারের বর্তমান লিংক আনে; না পেলে null */
     suspend fun fetchServerUrl(): String? = withContext(Dispatchers.IO) {
         try {
