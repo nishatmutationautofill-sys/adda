@@ -19,12 +19,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.remoteconfig.FirebaseRemoteConfig
-import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
+import com.adda.chat.data.Api
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 
-/** Reads the public APK URL from Firebase Remote Config and renders its QR code. */
+/** Reads apkUrl from Firestore appConfig/runtime and renders its QR code. */
 @Composable
 fun DownloadAppScreen() {
     var downloadUrl by remember { mutableStateOf("") }
@@ -32,13 +34,14 @@ fun DownloadAppScreen() {
     var error by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var refreshedAtLeastOnce by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     fun makeQr(value: String) {
         qrBitmap = null
         error = ""
         val url = value.trim()
         if (url.isBlank()) {
-            error = "Firebase Remote Config-এ adda_apk_url সেট করুন।"
+            error = "Firestore-এর appConfig/runtime ডকুমেন্টে apkUrl ফিল্ডে APK লিংক দিন।"
             return
         }
         if (!url.startsWith("https://")) {
@@ -57,31 +60,18 @@ fun DownloadAppScreen() {
         }
     }
 
-    fun loadFirebaseUrl() {
+    suspend fun loadFirebaseUrl() {
         loading = true
         error = ""
-        try {
-            val remoteConfig = FirebaseRemoteConfig.getInstance()
-            val settings = FirebaseRemoteConfigSettings.Builder()
-                .setMinimumFetchIntervalInSeconds(3600)
-                .build()
-            remoteConfig.setConfigSettingsAsync(settings)
-            remoteConfig.setDefaultsAsync(mapOf("adda_apk_url" to ""))
-            remoteConfig.fetchAndActivate().addOnCompleteListener { task ->
-                loading = false
-                refreshedAtLeastOnce = true
-                val value = remoteConfig.getString("adda_apk_url").trim()
-                downloadUrl = value
-                if (task.isSuccessful) {
-                    makeQr(value)
-                } else {
-                    qrBitmap = null
-                    error = "Firebase থেকে ডাউনলোড লিংক আনা যায়নি। ইন্টারনেট ও Remote Config সেটিং পরীক্ষা করুন।"
-                }
-            }
-        } catch (_: Exception) {
-            loading = false
-            error = "Firebase Remote Config চালু নেই। Firebase Console-এ সেটআপ করুন।"
+        val value = withContext(Dispatchers.IO) { Api.fetchApkUrl() }.orEmpty()
+        loading = false
+        refreshedAtLeastOnce = true
+        downloadUrl = value
+        if (value.isNotBlank()) {
+            makeQr(value)
+        } else {
+            qrBitmap = null
+            error = "Firestore থেকে apkUrl পাওয়া যায়নি। appConfig/runtime ডকুমেন্টে apkUrl ফিল্ড ও ইন্টারনেট পরীক্ষা করুন।"
         }
     }
 
@@ -98,7 +88,7 @@ fun DownloadAppScreen() {
         Card(Modifier.fillMaxWidth().padding(top = 20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Filled.QrCode2, null, tint = Color(0xFF6957D5), modifier = Modifier.size(28.dp))
-                Text("Firebase থেকে ডাউনলোড লিংক", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 8.dp))
+                Text("Firestore থেকে ডাউনলোড লিংক", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 8.dp))
                 when {
                     loading -> CircularProgressIndicator(Modifier.padding(top = 18.dp))
                     qrBitmap != null -> {
@@ -106,18 +96,18 @@ fun DownloadAppScreen() {
                         Text("QR স্ক্যান করলে APK-এর পাবলিক HTTPS লিংক খুলবে", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         Text(downloadUrl, color = Ink, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
-                    else -> Text("Firebase Remote Config-এ সঠিক ডাউনলোড URL যোগ করুন।", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 18.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    else -> Text("Firestore-এ সঠিক ডাউনলোড URL যোগ করুন।", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 18.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 10.dp), fontSize = 13.sp)
-                Button(onClick = { loadFirebaseUrl() }, enabled = !loading, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                Button(onClick = { scope.launch { loadFirebaseUrl() } }, enabled = !loading, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
                     Text(if (refreshedAtLeastOnce) "লিংক আবার লোড করুন" else "Firebase থেকে লিংক আনুন")
                 }
             }
         }
         Card(Modifier.fillMaxWidth().padding(top = 14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFEDEAFF)), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text("একবার Firebase-এ সেট করলেই হবে", fontWeight = FontWeight.Bold, color = Ink)
-                Text("Firebase Console → Remote Config → adda_apk_url নামে String parameter তৈরি করুন এবং Google Drive-এর APK-এর পাবলিক ডাউনলোড URL দিন। পরিবর্তন Publish করুন। APK ফাইলটি ‘Anyone with the link’ দিয়ে শেয়ারযোগ্য হতে হবে।", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+                Text("একবার Firestore-এ সেট করলেই হবে", fontWeight = FontWeight.Bold, color = Ink)
+                Text("Firebase Console → Firestore → appConfig → runtime ডকুমেন্টে apkUrl নামে String field রাখুন এবং Google Drive-এর APK-এর শেয়ার লিংক দিন। APK ফাইলটি ‘Anyone with the link’ দিয়ে শেয়ারযোগ্য হতে হবে।", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                 Text("Google Drive-এর লিংক স্ক্যান করলে Drive-এর ডাউনলোড/প্রিভিউ পেজ খুলতে পারে; ব্যবহারকারীকে সেখান থেকে Download চাপতে হতে পারে।", color = Ink, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
