@@ -325,6 +325,21 @@ object Session {
         }
     }
 
+    // ---------- মেসেজের অবস্থা (পাঠানো / পৌঁছেছে / দেখেছে) ----------
+
+    private fun applyStatus(ids: Set<String>, status: Int) {
+        for (i in messages.indices) {
+            val m = messages[i]
+            if (m.id in ids && m.status < status) messages[i] = m.copy(status = status)
+        }
+    }
+
+    /** চ্যাট খোলা ও অ্যাপ সামনে থাকলে সার্ভারকে জানায় যে বন্ধুর মেসেজ দেখা হয়েছে */
+    fun markSeen(peer: String) {
+        if (!appInForeground || !socketConnected) return
+        socket?.emit("chat:seen", JSONObject().put("uid", peer))
+    }
+
     // ---------- আনফ্রেন্ড / ব্লক ----------
 
     private suspend fun afterFriendshipRemoved(uid: String) {
@@ -635,7 +650,7 @@ object Session {
         return remote
     }
 
-    fun sendText(text: String, secure: Boolean = false, ttlSeconds: Int = 3, onDone: (success: Boolean) -> Unit) {
+    fun sendText(text: String, secure: Boolean = false, ttlSeconds: Int = 3, replyTo: String? = null, onDone: (success: Boolean) -> Unit) {
         val to = activeFriend ?: return
         val s = socket
         if (s == null || !socketConnected) {
@@ -656,6 +671,7 @@ object Session {
                     .put("text", wireText)
                     .put("secure", secure)
                     .put("ttlSeconds", ttlSeconds.coerceIn(1, 60))
+                if (replyTo != null) data.put("replyTo", JSONObject().put("id", replyTo))
                 s.emit("chat:send", data, Ack { args ->
                     val err = (args.firstOrNull() as? JSONObject)?.optString("error").orEmpty()
                     scope.launch {
@@ -670,7 +686,7 @@ object Session {
         }
     }
 
-    fun sendFile(uri: Uri, secure: Boolean = false, ttlSeconds: Int = 3) {
+    fun sendFile(uri: Uri, secure: Boolean = false, ttlSeconds: Int = 3, replyTo: String? = null) {
         val to = activeFriend ?: run { toast("ফাইল পাঠাতে আগে একজন বন্ধুকে নির্বাচন করুন"); return }
         if (mediaUploadProgress != null) { toast("আগের ফাইলটি আপলোড হচ্ছে"); return }
         scope.launch {
@@ -728,13 +744,15 @@ object Session {
                         .addFormDataPart("file", "encrypted.bin", encryptedBody)
                         .addFormDataPart("to", to).addFormDataPart("encrypted", "true")
                         .addFormDataPart("envelope", encrypted.envelope).addFormDataPart("secure", "true")
-                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
+                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
+                        .apply { if (replyTo != null) addFormDataPart("replyTo", JSONObject().put("id", replyTo).toString()) }.build()
                 } else {
                     MultipartBody.Builder().setType(MultipartBody.FORM)
                         .addFormDataPart("file", prepared.name, prepared.body)
                         .addFormDataPart("to", to).addFormDataPart("encrypted", "false")
                         .addFormDataPart("secure", "false")
-                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString()).build()
+                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
+                        .apply { if (replyTo != null) addFormDataPart("replyTo", JSONObject().put("id", replyTo).toString()) }.build()
                 }
                 mediaUploadLabel = "আপলোড হচ্ছে…"
                 val total = multipart.contentLength().coerceAtLeast(1L)
@@ -867,6 +885,16 @@ object Session {
             scope.launch {
                 refreshPeople()
                 toast("${o?.optString("username")?.ifEmpty { null } ?: o?.optString("uid").orEmpty()} আপনার রিকুয়েস্ট গ্রহণ করেছেন")
+            }
+        }
+        s.on("chat:status") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            val arr = o?.optJSONArray("ids")
+            val st = o?.optInt("status", 0) ?: 0
+            if (arr != null && st > 0) {
+                val ids = HashSet<String>()
+                for (i in 0 until arr.length()) ids.add(arr.optString(i))
+                scope.launch { applyStatus(ids, st) }
             }
         }
         s.on("friend:removed") { args ->

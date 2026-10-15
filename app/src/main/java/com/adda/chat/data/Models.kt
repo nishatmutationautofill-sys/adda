@@ -39,7 +39,14 @@ data class ChatMessage(
     val ttlSeconds: Int = 0,
     val expiresAt: Long = 0L,
     /** চ্যাট খোলার সময় সার্ভার থেকে আসা আগের মেসেজ (লাইভ নয়) — ছবি/ভিডিও ব্লার থাকবে, ট্যাপে লোড হবে */
-    val history: Boolean = false
+    val history: Boolean = false,
+    /** রিপ্লাই: যে মেসেজের উত্তর দেওয়া হয়েছে তার আইডি, প্রেরক ও (সার্ভার-বানানো) স্নিপেট */
+    val replyToId: String? = null,
+    val replyText: String = "",
+    val replyFrom: String = "",
+    val replyKind: String = "",
+    /** ০ পাঠানো, ১ পৌঁছেছে, ২ দেখেছে */
+    val status: Int = 0
 ) {
     val isFile: Boolean get() = type == "file" && !fileUrl.isNullOrEmpty()
     val isImage: Boolean
@@ -102,7 +109,16 @@ fun parseMessage(o: JSONObject): ChatMessage = ChatMessage(
     envelope = if (o.isNull("envelope")) null else o.optString("envelope").takeIf { it.isNotBlank() && it != "null" },
     secure = o.optBoolean("secure", false),
     ttlSeconds = o.optInt("ttlSeconds", 0),
-    expiresAt = if (o.isNull("expiresAt")) 0L else parseDate(o.opt("expiresAt"))
+    expiresAt = if (o.isNull("expiresAt")) 0L else parseDate(o.opt("expiresAt")),
+    replyToId = o.optJSONObject("replyTo")?.optString("id")?.takeIf { it.isNotEmpty() },
+    replyText = o.optJSONObject("replyTo")?.optString("text").orEmpty(),
+    replyFrom = o.optJSONObject("replyTo")?.optString("from").orEmpty(),
+    replyKind = o.optJSONObject("replyTo")?.optString("kind").orEmpty(),
+    status = when {
+        o.has("seenAt") && !o.isNull("seenAt") -> 2
+        o.has("deliveredAt") && !o.isNull("deliveredAt") -> 1
+        else -> 0
+    }
 )
 
 private fun parseDate(v: Any?): Long {

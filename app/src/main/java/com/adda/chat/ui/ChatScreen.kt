@@ -19,6 +19,23 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -124,6 +141,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var selectedDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showProfile by remember { mutableStateOf(false) }
     var headerMenu by remember { mutableStateOf(false) }
+    var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
     var attachMenu by remember { mutableStateOf(false) }
     var confirmAction by remember { mutableStateOf<String?>(null) }
     var showEmojiPack by remember { mutableStateOf(false) }
@@ -132,15 +150,24 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var recordingFile by remember { mutableStateOf<File?>(null) }
     var customEmojis by remember { mutableStateOf(loadEmojiPack(ctx)) }
     val listState = rememberLazyListState()
+    val uiScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val composerColor by animateColorAsState(if (secureMode) Ink else Color.White, label = "composerColor")
+    val secureBg by animateColorAsState(if (secureMode) Color(0xFFDDE8F6) else Color.Transparent, label = "secureBg")
+    val barTint = if (secureMode) Color(0xFF8DBBFF) else Accent
+    val softTint = if (secureMode) Color(0xFF6B8CB8) else Muted
+
+    // চ্যাট খোলা থাকলে এবং নতুন মেসেজ এলে "দেখেছে" জানানো
+    LaunchedEffect(uid, Session.startTick, Session.messages.size, Session.socketConnected) { Session.markSeen(uid) }
 
     BackHandler { Session.closeConversation() }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) Session.sendFile(uri, secureMode, ttlSeconds)
+        if (uri != null) { Session.sendFile(uri, secureMode, ttlSeconds, replyTarget?.id); replyTarget = null }
     }
     val videoCapture = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            result.data?.data?.let { Session.sendFile(it, secureMode, ttlSeconds) }
+            result.data?.data?.let { Session.sendFile(it, secureMode, ttlSeconds, replyTarget?.id); replyTarget = null }
                 ?: Toast.makeText(ctx, "ভিডিও পাওয়া যায়নি", Toast.LENGTH_SHORT).show()
         }
     }
@@ -210,8 +237,17 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             }
         }
 
+        // Secure Me চালু থাকলে স্পষ্ট ব্যানার
+        if (secureMode) {
+            Row(Modifier.fillMaxWidth().background(Ink).padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = Color(0xFF8DBBFF), modifier = Modifier.size(14.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("সিকিউর মোড চালু · দেখার ${ttlSeconds} সেকেন্ড পর মেসেজ মুছে যাবে", color = Color.White, fontSize = 12.sp)
+            }
+        }
+
         // মেসেজ
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(secureBg)) {
             if (Session.messages.isEmpty()) {
                 Column(
                     Modifier.fillMaxSize(),
@@ -235,7 +271,15 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         mine = m.from == Session.me?.uid,
                         onOpenImage = { viewerUrl = it; viewerSecure = m.secure },
                         onDownload = { downloadFile(ctx, it, m.fileName) },
-                        onMenu = { selectedDelete = m }
+                        onMenu = { selectedDelete = m },
+                        onReply = {
+                            if (m.secure) Toast.makeText(ctx, "সিকিউর মেসেজে রিপ্লাই করা যায় না", Toast.LENGTH_SHORT).show()
+                            else replyTarget = m
+                        },
+                        onJump = { id ->
+                            val idx = Session.messages.indexOfFirst { it.id == id }
+                            if (idx >= 0) uiScope.launch { listState.animateScrollToItem(idx) }
+                        }
                     )
                 }
             }
@@ -247,7 +291,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                             try { recorder?.release() } catch (_: Exception) { }
                             recorder = null
                             recording = false
-                            recordingFile?.let { Session.sendFile(Uri.fromFile(it), secureMode, ttlSeconds) }
+                            recordingFile?.let { Session.sendFile(Uri.fromFile(it), secureMode, ttlSeconds, replyTarget?.id); replyTarget = null }
                             recordingFile = null
                         } else {
                             requestCallPermission("audio") {
@@ -277,36 +321,60 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         }
 
         // কম্পোজার
-        Surface(color = Color.White, shadowElevation = 14.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+        Surface(color = composerColor, shadowElevation = 14.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                replyTarget?.let { r ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(14.dp))
+                            .background(if (secureMode) Color(0xFF17375F) else Them).height(52.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(Modifier.width(4.dp).fillMaxHeight().background(if (secureMode) Color(0xFF8DBBFF) else Accent))
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                            Text(
+                                if (r.from == Session.me?.uid) "নিজেকে রিপ্লাই" else "${Session.displayName(r.from)} কে রিপ্লাই",
+                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = barTint, maxLines = 1
+                            )
+                            Text(
+                                if (r.isFile) (r.fileName ?: "ফাইল") else r.text,
+                                fontSize = 13.sp, color = if (secureMode) Color.White else Muted, maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(onClick = { replyTarget = null }) { Icon(Icons.Filled.Close, contentDescription = "রিপ্লাই বাতিল", tint = softTint) }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
                         Modifier.clip(RoundedCornerShape(50))
-                            .background(if (secureMode) Color(0xFFFDECEA) else Canvas)
-                            .border(1.dp, if (secureMode) Color(0xFFB3261E) else Line, RoundedCornerShape(50))
-                            .clickable { secureMode = !secureMode }
+                            .background(if (secureMode) Color(0xFF17375F) else Canvas)
+                            .border(1.dp, if (secureMode) Color(0xFF2B568C) else Line, RoundedCornerShape(50))
+                            .clickable { secureMode = !secureMode; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(15.dp),
-                            tint = if (secureMode) Color(0xFFB3261E) else Muted)
+                            tint = if (secureMode) Color(0xFF8DBBFF) else Muted)
                         Spacer(Modifier.size(6.dp))
-                        Text("Secure Me", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                            color = if (secureMode) Color(0xFFB3261E) else Muted)
+                        Text(if (secureMode) "সিকিউর মোড চালু" else "Secure Me", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                            color = if (secureMode) Color.White else Muted)
                     }
                     Spacer(Modifier.weight(1f))
                 }
                 if (secureMode) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${ttlSeconds}s", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
+                        Text("${ttlSeconds} সে.", color = Color(0xFF8DBBFF), fontWeight = FontWeight.Bold)
                         Slider(
                             value = ttlSeconds.toFloat(),
                             onValueChange = { ttlSeconds = it.toInt().coerceIn(1, 60) },
                             valueRange = 1f..60f,
                             steps = 58,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF6FA8FF), activeTrackColor = Color(0xFF6FA8FF),
+                                inactiveTrackColor = Color(0xFF2B568C), activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent
+                            ),
                             modifier = Modifier.weight(1f)
                         )
-                        Text("60s", color = Muted, fontSize = 11.sp)
+                        Text("60", color = Color(0xFF6B8CB8), fontSize = 11.sp)
                     }
                 }
                 if (Session.mediaUploadProgress != null) {
@@ -327,7 +395,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
-                        IconButton(onClick = { attachMenu = true }) { Icon(Icons.Filled.AttachFile, contentDescription = "সংযুক্ত করুন", tint = Accent) }
+                        IconButton(onClick = { attachMenu = true }) { Icon(Icons.Filled.AttachFile, contentDescription = "সংযুক্ত করুন", tint = barTint) }
                         DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                             DropdownMenuItem(text = { Text("ছবি") }, onClick = { attachMenu = false; picker.launch("image/*") })
                             DropdownMenuItem(text = { Text("ভিডিও (২ মিনিট পর্যন্ত)") }, onClick = { attachMenu = false; picker.launch("video/*") })
@@ -337,21 +405,24 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     IconButton(onClick = {
                         val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 120).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
                         try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
-                    }) { Icon(Icons.Filled.Videocam, contentDescription = "২ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
+                    }) { Icon(Icons.Filled.Videocam, contentDescription = "২ মিনিট পর্যন্ত ভিডিও", tint = barTint) }
                     TextField(
                         value = input,
                         onValueChange = { input = it },
-                        placeholder = { Text(if (recording) "ভয়েস রেকর্ড হচ্ছে…" else "মেসেজ লিখুন…", color = Muted) },
+                        placeholder = { Text(if (recording) "ভয়েস রেকর্ড হচ্ছে…" else if (secureMode) "সিকিউর মেসেজ লিখুন…" else "মেসেজ লিখুন…", color = softTint) },
                         maxLines = 4,
                         shape = RoundedCornerShape(24.dp),
                         trailingIcon = {
                             IconButton(onClick = { showEmojiPack = true }) {
-                                Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = Muted)
+                                Icon(Icons.Filled.EmojiEmotions, contentDescription = "ইমোজি", tint = softTint)
                             }
                         },
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Canvas,
-                            unfocusedContainerColor = Canvas,
+                            focusedContainerColor = if (secureMode) Color(0xFF17375F) else Canvas,
+                            unfocusedContainerColor = if (secureMode) Color(0xFF17375F) else Canvas,
+                            focusedTextColor = if (secureMode) Color.White else Ink,
+                            unfocusedTextColor = if (secureMode) Color.White else Ink,
+                            cursorColor = if (secureMode) Color(0xFF8DBBFF) else Accent,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                             disabledIndicatorColor = Color.Transparent
@@ -362,10 +433,10 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     val hasText = input.isNotBlank()
                     Box(
                         Modifier.size(46.dp).clip(CircleShape)
-                            .let { if (recording) it.background(Color(0xFFE54868)) else it.background(BubbleBrush) }
+                            .let { if (recording) it.background(Color(0xFFE54868)) else if (secureMode) it.background(Color(0xFF6FA8FF)) else it.background(BubbleBrush) }
                             .clickable {
                                 val text = input.trim()
-                                if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds) { ok -> if (ok) input = "" }
+                                if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds, replyTarget?.id) { ok -> if (ok) { input = ""; replyTarget = null } }
                                 else toggleRecord()
                             },
                         contentAlignment = Alignment.Center
@@ -373,7 +444,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         Icon(
                             if (hasText) Icons.AutoMirrored.Filled.Send else if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
                             contentDescription = if (hasText) "পাঠান" else if (recording) "রেকর্ডিং বন্ধ করে পাঠান" else "ভয়েস মেসেজ রেকর্ড",
-                            tint = Color.White
+                            tint = if (secureMode && !recording) Ink else Color.White
                         )
                     }
                 }
@@ -506,12 +577,36 @@ private fun isEmojiCluster(c: String): Boolean {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit, onMenu: () -> Unit) {
+private fun MessageRow(
+    m: ChatMessage, mine: Boolean, onOpenImage: (String) -> Unit, onDownload: (String) -> Unit,
+    onMenu: () -> Unit, onReply: () -> Unit, onJump: (String) -> Unit
+) {
     val ctx = LocalContext.current
+    // ডানে টানলে রিপ্লাই (সোয়াইপ-রিপ্লাই)
+    var dragX by remember(m.id) { mutableStateOf(0f) }
+    val thresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
+    val shownX by animateFloatAsState(dragX, label = "swipeReply")
+    Box(
+        Modifier.fillMaxWidth().pointerInput(m.id) {
+            detectHorizontalDragGestures(
+                onDragEnd = { if (dragX >= thresholdPx) onReply(); dragX = 0f },
+                onDragCancel = { dragX = 0f },
+                onHorizontalDrag = { change, delta ->
+                    val next = dragX + delta
+                    if (next >= 0f) { dragX = next.coerceAtMost(thresholdPx * 1.4f); change.consume() } else dragX = 0f
+                }
+            )
+        }
+    ) {
+        Icon(
+            Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = Accent,
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp).size(22.dp).alpha((shownX / thresholdPx).coerceIn(0f, 1f))
+        )
     Column(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().offset { IntOffset(shownX.roundToInt(), 0) },
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
+        if (m.replyToId != null) ReplyQuote(m, onJump)
         val shape = RoundedCornerShape(
             topStart = 24.dp, topEnd = 24.dp,
             bottomEnd = if (mine) 6.dp else 24.dp,
@@ -592,12 +687,37 @@ private fun MessageRow(m: ChatMessage, mine: Boolean, onOpenImage: (String) -> U
                 }
             }
         }
-        Text(
-            "${timeFormat.format(Date(m.date))}",
-            fontSize = 11.sp,
-            color = Muted,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-        )
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(timeFormat.format(Date(m.date)), fontSize = 11.sp, color = Muted)
+            if (mine) {
+                Spacer(Modifier.size(4.dp))
+                Icon(
+                    if (m.status >= 1) Icons.Filled.DoneAll else Icons.Filled.Done,
+                    contentDescription = when (m.status) { 2 -> "দেখেছে"; 1 -> "পৌঁছেছে"; else -> "পাঠানো হয়েছে" },
+                    tint = if (m.status >= 2) Accent else Muted,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
+    }
+    }
+}
+
+/** রিপ্লাই করা মেসেজের ছোট উদ্ধৃতি — ট্যাপ করলে মূল মেসেজে যায় */
+@Composable
+private fun ReplyQuote(m: ChatMessage, onJump: (String) -> Unit) {
+    val who = if (m.replyFrom == Session.me?.uid) "আপনি" else Session.displayName(m.replyFrom)
+    val snippet = m.replyText.ifEmpty { if (m.replyKind == "file") "ফাইল" else "মেসেজ" }
+    Row(
+        Modifier.widthIn(max = 260.dp).padding(bottom = 3.dp).clip(RoundedCornerShape(14.dp)).background(Them)
+            .clickable { m.replyToId?.let(onJump) },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(4.dp).height(38.dp).background(Accent))
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 5.dp)) {
+            Text(who, fontSize = 11.sp, color = Accent, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(snippet, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
