@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -198,7 +200,7 @@ fun VoiceMessagePlayer(url: String, mine: Boolean) {
 /** ভিডিও মেসেজ কার্ড: থাম্বনেইল + প্লে বাটন; ট্যাপ করলে অ্যাপের ভেতরেই ফুল-স্ক্রিন প্লেয়ার */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun VideoMessageCard(url: String, onLongClick: () -> Unit = {}) {
+fun VideoMessageCard(url: String, onLongClick: () -> Unit = {}, onDownload: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     var show by remember { mutableStateOf(false) }
     var thumb by remember(url) { mutableStateOf<Bitmap?>(null) }
     var duration by remember(url) { mutableStateOf(0L) }
@@ -248,12 +250,17 @@ fun VideoMessageCard(url: String, onLongClick: () -> Unit = {}) {
             )
         }
     }
-    if (show) VideoViewerDialog(url) { show = false }
+    if (show) VideoViewerDialog(
+        url = url,
+        onDownload = onDownload,
+        onDelete = onDelete?.let { del -> { show = false; del() } },
+        onClose = { show = false }
+    )
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun VideoViewerDialog(url: String, onClose: () -> Unit) {
+private fun VideoViewerDialog(url: String, onDownload: (() -> Unit)?, onDelete: (() -> Unit)?, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val exo = remember(url) {
         buildPlayer(ctx).apply {
@@ -269,10 +276,18 @@ private fun VideoViewerDialog(url: String, onClose: () -> Unit) {
                 factory = { c -> PlayerView(c).apply { player = exo; useController = true } },
                 modifier = Modifier.fillMaxSize()
             )
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
-            ) { Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White) }
+            Row(
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onDownload != null) IconButton(onClick = onDownload) {
+                    Icon(Icons.Filled.Download, contentDescription = "ডাউনলোড", tint = Color.White)
+                }
+                if (onDelete != null) IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "ডিলেট", tint = Color.White)
+                }
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White) }
+            }
         }
     }
 }

@@ -4,8 +4,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val publicDownloadUrl = (System.getenv("DOWNLOAD_URL") ?: "").replace("\"", "")
-
 android {
     namespace = "com.adda.chat"
     compileSdk = 34
@@ -16,7 +14,6 @@ android {
         targetSdk = 34
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = System.getenv("VERSION_NAME") ?: "1.0"
-        buildConfigField("String", "DOWNLOAD_URL", "\"$publicDownloadUrl\"")
         // শুধু বাংলা ও ইংরেজি রিসোর্স রাখা (লাইব্রেরির বাকি ভাষা বাদ)
         resourceConfigurations += listOf("en", "bn")
         // x86/x86_64 বাদ দিয়ে শুধু দুই ধরনের মোবাইল CPU রাখা (ফাইল সাইজ কম রাখতে)
@@ -65,7 +62,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
     packaging {
         // native লাইব্রেরি APK-র ভেতরে কমপ্রেস থাকবে → ডাউনলোড/ফাইল সাইজ ছোট
@@ -95,7 +91,6 @@ dependencies {
 
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.firebase:firebase-config")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.0") {

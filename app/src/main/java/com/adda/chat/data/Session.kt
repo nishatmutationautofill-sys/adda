@@ -33,6 +33,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okio.Buffer
 import okio.ForwardingSink
 import okio.buffer
+import okio.sink
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -484,7 +485,13 @@ object Session {
         val forEveryone = everyone && message.from == me?.uid
         scope.launch {
             try {
-                Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}?scope=${if (forEveryone) "everyone" else "me"}")
+                val localOnly = message.fileUrl?.startsWith("file:") == true
+                try {
+                    Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}?scope=${if (forEveryone) "everyone" else "me"}")
+                } catch (e: Api.ApiException) {
+                    // P2P-তে পাঠানো/পাওয়া ফাইল সার্ভারে থাকে না; লোকাল ডিলেট চালিয়ে যাবে
+                    if (!localOnly) throw e
+                }
                 messages.firstOrNull { it.id == message.id }?.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } } }
                 messages.removeAll { it.id == message.id }
                 refreshPreviewFor(if (message.from == me?.uid) message.to else message.from)
@@ -736,7 +743,6 @@ object Session {
                         retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     } finally { retriever.release() }
                     if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
-                    if (durationMs > 120L * 1000L) throw IllegalArgumentException("২ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
                     mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে…"
                     val converted = VideoTranscoder.transcode(appContext, uri, durationMs)
                     if (converted != null) {
@@ -748,11 +754,7 @@ object Session {
                 } else {
                     withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
                 }
-                // P2P-only file sharing: no HTTP/server upload fallback is permitted.
-                val maxP2pBytes = 20L * 1024 * 1024
-                if (prepared.size > maxP2pBytes) {
-                    throw IllegalArgumentException("P2P-তে সর্বোচ্চ ২০ MB ফাইল পাঠানো যাবে। সার্ভার আপলোড বিকল্প বন্ধ আছে।")
-                }
+                // P2P-only file sharing: no HTTP/server upload fallback. ফাইলের সাইজের কোনো সীমা নেই (ডিস্ক থেকে স্ট্রিম হয়)।
                 if (secure) {
                     throw IllegalArgumentException("P2P-only মোডে Secure Me ফাইল পাঠানো বর্তমানে সমর্থিত নয়। Secure Me ফাইলের সার্ভার বিকল্প বন্ধ আছে।")
                 }
@@ -760,17 +762,19 @@ object Session {
                     P2pChatManager.connect(to)
                     throw IllegalStateException("P2P সংযোগ প্রস্তুত নয়। বন্ধুকে অনলাইনে রেখে সংযোগ তৈরি হওয়া পর্যন্ত অপেক্ষা করে আবার চেষ্টা করুন। কোনো সার্ভার আপলোড করা হয়নি।")
                 }
-                val buffer = Buffer()
-                withContext(Dispatchers.IO) { prepared.body.writeTo(buffer) }
-                val bytes = buffer.readByteArray()
                 val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
-                if (!P2pChatManager.sendFile(to, prepared.name, mime, bytes)) {
+                val local = File(appContext.cacheDir, "p2p_sent_${java.util.UUID.randomUUID()}_${prepared.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
+                mediaUploadLabel = "ফাইল প্রস্তুত হচ্ছে…"
+                withContext(Dispatchers.IO) { local.sink().buffer().use { prepared.body.writeTo(it) } }
+                mediaUploadLabel = "ফাইল পাঠানো হচ্ছে…"
+                mediaUploadProgress = 0f
+                val ok = P2pChatManager.sendFile(to, prepared.name, mime, local) { mediaUploadProgress = it }
+                if (!ok) {
+                    withContext(Dispatchers.IO) { local.delete() }
                     throw IllegalStateException("P2P ফাইল ট্রান্সফার ব্যর্থ হয়েছে। বিকল্প সার্ভার আপলোড বন্ধ আছে; আবার চেষ্টা করুন।")
                 }
-                val local = File(appContext.cacheDir, "p2p_sent_${java.util.UUID.randomUUID()}_${prepared.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
-                withContext(Dispatchers.IO) { local.writeBytes(bytes) }
                 val sender = me?.uid ?: throw IllegalStateException("লগইন নেই")
-                addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "file", "", Uri.fromFile(local).toString(), prepared.name, bytes.size.toLong(), System.currentTimeMillis()))
+                addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "file", "", Uri.fromFile(local).toString(), prepared.name, local.length(), System.currentTimeMillis()))
                 mediaUploadProgress = 1f
                 toast("ফাইল সরাসরি P2P-তে পাঠানো হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }

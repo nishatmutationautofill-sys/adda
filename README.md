@@ -166,8 +166,3 @@ Selected videos are checked against the 5-minute limit, then transcoded before E
 - **অ্যাভাটার:** ছবি না থাকলে নাম অনুযায়ী আলাদা রঙিন গ্রেডিয়েন্টে নামের প্রথম অক্ষর।
 - **চ্যাট:** বড় গোল বাবল (নিজের মেসেজ গ্রেডিয়েন্টে), হালকা রঙিন ব্যাকগ্রাউন্ড, উপরের দিকে গোল কম্পোজার।
 - **কার্ড/লিস্ট:** বেশি গোল কোণ ও নরম ছায়া, গ্রেডিয়েন্ট আনরিড ব্যাজ।
-
-
-## Adda app download QR screen
-
-The bottom navigation now includes **ডাউনলোড**. It creates a QR code for the configured public APK URL. The QR code does not host the APK; first publish the signed APK at a stable public HTTPS download URL. Configure it in GitHub Actions/build environment as `DOWNLOAD_URL=https://your-domain.example/adda.apk`, or enter the actual URL in the screen. Leave it blank until a real APK URL is available. Test the URL from a different device before sharing the QR.

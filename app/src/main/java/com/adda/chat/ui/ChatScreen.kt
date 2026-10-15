@@ -23,6 +23,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -138,6 +144,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var ttlSeconds by remember { mutableStateOf(3) }
     var viewerUrl by remember { mutableStateOf<String?>(null) }
     var viewerSecure by remember { mutableStateOf(false) }
+    var viewerMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var selectedDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showProfile by remember { mutableStateOf(false) }
     var headerMenu by remember { mutableStateOf(false) }
@@ -269,7 +276,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     MessageRow(
                         m,
                         mine = m.from == Session.me?.uid,
-                        onOpenImage = { viewerUrl = it; viewerSecure = m.secure },
+                        onOpenImage = { viewerUrl = it; viewerSecure = m.secure; viewerMsg = m },
                         onDownload = { downloadFile(ctx, it, m.fileName) },
                         onMenu = { selectedDelete = m },
                         onReply = {
@@ -398,14 +405,14 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         IconButton(onClick = { attachMenu = true }) { Icon(Icons.Filled.AttachFile, contentDescription = "সংযুক্ত করুন", tint = barTint) }
                         DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                             DropdownMenuItem(text = { Text("ছবি") }, onClick = { attachMenu = false; picker.launch("image/*") })
-                            DropdownMenuItem(text = { Text("ভিডিও (২ মিনিট পর্যন্ত)") }, onClick = { attachMenu = false; picker.launch("video/*") })
+                            DropdownMenuItem(text = { Text("ভিডিও") }, onClick = { attachMenu = false; picker.launch("video/*") })
                             DropdownMenuItem(text = { Text("অন্য ফাইল") }, onClick = { attachMenu = false; picker.launch("*/*") })
                         }
                     }
                     IconButton(onClick = {
-                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 120).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
+                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
                         try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
-                    }) { Icon(Icons.Filled.Videocam, contentDescription = "২ মিনিট পর্যন্ত ভিডিও", tint = barTint) }
+                    }) { Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও", tint = barTint) }
                     TextField(
                         value = input,
                         onValueChange = { input = it },
@@ -459,6 +466,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             onDismiss = { selectedDelete = null },
             onDeleteForMe = { selectedDelete = null; Session.deleteMessage(target, everyone = false) },
             onDeleteForEveryone = { selectedDelete = null; Session.deleteMessage(target, everyone = true) },
+            onDownload = { url -> selectedDelete = null; downloadFile(ctx, url, target.fileName) },
             onOpenExternal = { url ->
                 selectedDelete = null
                 val name = target.fileName.orEmpty()
@@ -539,7 +547,13 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     }
 
     viewerUrl?.let { url ->
-        ImageViewer(url = url, onClose = { viewerUrl = null })
+        ImageViewer(
+            url = url,
+            canDownload = !viewerSecure,
+            onDownload = { downloadFile(ctx, url, viewerMsg?.fileName) },
+            onDelete = { val t = viewerMsg; viewerUrl = null; viewerMsg = null; selectedDelete = t },
+            onClose = { viewerUrl = null; viewerMsg = null }
+        )
     }
 }
 
@@ -646,7 +660,11 @@ private fun MessageRow(
                 VoiceMessagePlayer(Api.absoluteUrl(m.fileUrl.orEmpty()), mine)
             }
         } else if (m.isFile && isVideoFile(m.fileName)) {
-            VideoMessageCard(Api.absoluteUrl(m.fileUrl.orEmpty()), onLongClick = onMenu)
+            VideoMessageCard(
+                Api.absoluteUrl(m.fileUrl.orEmpty()), onLongClick = onMenu,
+                onDownload = if (m.secure) null else ({ onDownload(Api.absoluteUrl(m.fileUrl.orEmpty())) }),
+                onDelete = onMenu
+            )
         } else if (m.isFile) {
             val url = Api.absoluteUrl(m.fileUrl.orEmpty())
             val fileName = m.fileName ?: "ফাইল"
@@ -772,7 +790,8 @@ private fun MessageActionSheet(
     onDismiss: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForEveryone: () -> Unit,
-    onOpenExternal: (String) -> Unit
+    onOpenExternal: (String) -> Unit,
+    onDownload: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
     Dialog(
@@ -816,6 +835,9 @@ private fun MessageActionSheet(
                     if (message.isFile && !message.secure && !message.isImage && !message.isVideo) {
                         SheetRow(Icons.Filled.AttachFile, "খুলুন", Ink) { onOpenExternal(Api.absoluteUrl(message.fileUrl.orEmpty())) }
                     }
+                    if (message.isFile && !message.secure) {
+                        SheetRow(Icons.Filled.Download, "ডাউনলোড", Ink) { onDownload(Api.absoluteUrl(message.fileUrl.orEmpty())) }
+                    }
                     SheetRow(Icons.Filled.Delete, "শুধু আমার থেকে ডিলেট", Danger) { onDeleteForMe() }
                     if (mine) {
                         SheetRow(Icons.Filled.DeleteSweep, "উভয় দিক থেকে ডিলেট", Danger) { onDeleteForEveryone() }
@@ -846,21 +868,50 @@ private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text
 }
 
 @Composable
-private fun ImageViewer(url: String, onClose: () -> Unit) {
+private fun ImageViewer(url: String, canDownload: Boolean, onDownload: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var box by remember { mutableStateOf(IntSize.Zero) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.fillMaxSize().background(Color.Black).onSizeChanged { box = it }) {
             AsyncImage(
                 model = ImageRequest.Builder(ctx).data(url).addHeader("ngrok-skip-browser-warning", "true").build(),
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
+                    // ডবল ট্যাপ: জুম ইন / জুম আউট
+                    .pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = {
+                            if (scale > 1f) { scale = 1f; offset = Offset.Zero } else scale = 2.5f
+                        })
+                    }
+                    // দুই আঙুলে পিঞ্চ জুম ইন/আউট এবং টেনে সরানো
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val ns = (scale * zoom).coerceIn(1f, 6f)
+                            val maxX = box.width * (ns - 1f) / 2f
+                            val maxY = box.height * (ns - 1f) / 2f
+                            offset = if (ns <= 1f) Offset.Zero
+                            else Offset((offset.x + pan.x).coerceIn(-maxX, maxX), (offset.y + pan.y).coerceIn(-maxY, maxY))
+                            scale = ns
+                        }
+                    }
+                    .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
             )
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
+            Row(
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White)
+                if (canDownload) IconButton(onClick = onDownload) {
+                    Icon(Icons.Filled.Download, contentDescription = "ডাউনলোড", tint = Color.White)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "ডিলেট", tint = Color.White)
+                }
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", tint = Color.White)
+                }
             }
         }
     }
@@ -877,7 +928,9 @@ private fun downloadFile(ctx: android.content.Context, url: String, suggestedNam
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, cleanName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.MediaColumns.MIME_TYPE,
+                        android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(cleanName.substringAfterLast('.', "").lowercase())
+                            ?: "application/octet-stream")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 }
                 val dest = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)

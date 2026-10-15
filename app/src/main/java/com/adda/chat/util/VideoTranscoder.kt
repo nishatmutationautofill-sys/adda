@@ -27,28 +27,28 @@ import java.io.File
 import kotlin.coroutines.resume
 
 /**
- * পাঠানোর আগে ভিডিও ছোট করে: MP4 / H.264, সর্বোচ্চ 480p, ~900 kbps।
+ * পাঠানোর আগে ভিডিও কমপ্রেস করে: MP4 / H.264, সর্বোচ্চ 720p, স্ট্যান্ডার্ড বিটরেট ~2.5 Mbps।
  * Media3 Transformer ফোনের হার্ডওয়্যার এনকোডার ব্যবহার করে — দ্রুত, কম ব্যাটারি, APK ছোট।
  * কনভার্ট ব্যর্থ হলে null দেয়; তখন কলার আসল ফাইলই পাঠায়, অ্যাপ ক্র্যাশ করে না।
  */
 object VideoTranscoder {
-    private const val MAX_INPUT_DURATION_MS = 120L * 1000L
-    private const val MAX_OUTPUT_BYTES = 50L * 1024L * 1024L
-    private const val TIMEOUT_MS = 240_000L
+    private const val TARGET_HEIGHT = 720
+    private const val VIDEO_BITRATE = 2_500_000 // 720p-এর জন্য স্ট্যান্ডার্ড
+    private const val MIN_TIMEOUT_MS = 10L * 60L * 1000L
 
     data class Result(val file: File, val durationMs: Long)
 
     suspend fun transcode(context: Context, sourceUri: Uri, durationMs: Long): Result? {
-        require(durationMs in 1..MAX_INPUT_DURATION_MS) {
-            if (durationMs > MAX_INPUT_DURATION_MS) "২ মিনিটের বেশি ভিডিও পাঠানো যাবে না" else "ভিডিওর দৈর্ঘ্য পড়া যায়নি"
-        }
+        require(durationMs > 0) { "ভিডিওর দৈর্ঘ্য পড়া যায়নি" }
+        // দৈর্ঘ্যের কোনো সীমা নেই; লম্বা ভিডিওর জন্য টাইমআউট দৈর্ঘ্য অনুযায়ী বাড়ে
+        val timeoutMs = maxOf(MIN_TIMEOUT_MS, durationMs * 4)
         val dir = File(context.cacheDir, "video_transcode").apply { mkdirs() }
         dir.listFiles()?.forEach { runCatching { it.delete() } }
         val output = File(dir, "adda_${System.currentTimeMillis()}.mp4")
         return try {
             val height = withContext(Dispatchers.IO) { displayHeight(context, sourceUri) }
-            val ok = withTimeoutOrNull(TIMEOUT_MS) { runTransformer(context, sourceUri, output, height) } ?: false
-            if (ok && output.exists() && output.length() in 1..MAX_OUTPUT_BYTES) Result(output, durationMs)
+            val ok = withTimeoutOrNull(timeoutMs) { runTransformer(context, sourceUri, output, height) } ?: false
+            if (ok && output.exists() && output.length() > 0) Result(output, durationMs)
             else {
                 runCatching { output.delete() }
                 null
@@ -67,13 +67,13 @@ object VideoTranscoder {
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
                 val videoEffects = ArrayList<Effect>()
-                // ছোট ভিডিও বড় করা হবে না; শুধু ৪৮০p-র বেশি হলে নামানো হবে
-                if (displayHeight > 480) videoEffects.add(Presentation.createForHeight(480))
+                // ভিডিও ৭২০p করা হয়; ছোট ভিডিও জোর করে বড় করা হয় না (মান নষ্ট হয়, সাইজ বাড়ে)
+                if (displayHeight > TARGET_HEIGHT) videoEffects.add(Presentation.createForHeight(TARGET_HEIGHT))
                 val edited = EditedMediaItem.Builder(MediaItem.fromUri(src))
                     .setEffects(Effects(emptyList(), videoEffects))
                     .build()
                 val encoder = DefaultEncoderFactory.Builder(ctx)
-                    .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(900_000).build())
+                    .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(VIDEO_BITRATE).build())
                     .build()
                 val transformer = Transformer.Builder(ctx)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)

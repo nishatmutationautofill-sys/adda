@@ -23,7 +23,6 @@ import kotlin.math.min
 
 /** আপলোডের জন্য ফাইল তৈরি করে; ছবি হলে imo-র মতো কমপ্রেস করে ছোট JPEG বানায় */
 object FileUpload {
-    const val MAX_BYTES = 50L * 1024 * 1024
     private const val MAX_SIDE = 1280
     private const val JPEG_QUALITY = 70
 
@@ -62,7 +61,6 @@ object FileUpload {
             else -> "application/octet-stream"
         }
         val mime = cr.getType(uri) ?: fallbackMime
-        if (size > MAX_BYTES) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
 
         if (mime.startsWith("image/") && !mime.contains("gif") && !mime.contains("svg")) {
             val bytes = compressImage(ctx, uri, size)
