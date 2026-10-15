@@ -60,7 +60,9 @@ fun MainShell() {
         AndroidView(
             modifier = Modifier.fillMaxWidth().heightIn(min = 0.dp, max = 60.dp),
             factory = { context ->
-                com.startapp.sdk.ads.banner.Banner(context)
+                val host = context.findActivity()
+                if (host != null) com.startapp.sdk.ads.banner.Banner(host) as android.view.View
+                else android.view.View(context)
             }
         )
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp)) {

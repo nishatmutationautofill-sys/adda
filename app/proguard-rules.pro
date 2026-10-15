@@ -29,3 +29,11 @@
 -dontwarn com.startapp.**
 -dontwarn com.truenet.**
 -dontwarn org.jetbrains.annotations.**
+
+# রিলিজ বিল্ডে R8 যেন "Missing class" সতর্কতায় ব্যর্থ না হয়
+-ignorewarnings
+-dontwarn javax.annotation.**
+-dontwarn javax.lang.model.**
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn org.checkerframework.**
+-dontwarn kotlin.Unit

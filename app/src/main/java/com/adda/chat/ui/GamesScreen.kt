@@ -14,11 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import com.startapp.sdk.adsbase.StartAppAd
 import com.startapp.sdk.adsbase.Ad
-import com.startapp.sdk.adsbase.AdMode
 import com.startapp.sdk.adsbase.adlisteners.AdEventListener
 import com.startapp.sdk.adsbase.adlisteners.VideoListener
 import java.util.UUID
@@ -99,7 +96,7 @@ fun GamesScreen() {
                         }
                     }
                 })
-                ad.loadAd(AdMode.REWARDED_VIDEO, object : AdEventListener {
+                ad.loadAd(StartAppAd.AdMode.REWARDED_VIDEO, object : AdEventListener {
                     override fun onReceiveAd(adInfo: Ad) {
                         activity.runOnUiThread {
                             rewardMessage = "ভিডিও চলছে… সম্পূর্ণ দেখুন।"
@@ -297,9 +294,3 @@ fun GamesScreen() {
 
 }
 
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
