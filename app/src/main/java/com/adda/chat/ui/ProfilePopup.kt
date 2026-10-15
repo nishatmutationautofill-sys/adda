@@ -56,7 +56,11 @@ data class ProfileInfo(
     val photoUrl: String?,
     val online: Boolean? = null,
     /** শুধু নিজের প্রোফাইলে true — "ছবি বদলান" বাটন দেখায় */
-    val isMe: Boolean = false
+    val isMe: Boolean = false,
+    /** সক্রিয়তা ব্যাচের স্তর (০-৪); badgeScore >= 0 হলে নিজের স্কোর ও পরের স্তরের হিসাব দেখায় */
+    val badge: Int = 0,
+    val badgeScore: Int = -1,
+    val badgeNext: Int = 0
 )
 
 /**
@@ -130,6 +134,18 @@ fun ProfilePopup(info: ProfileInfo, onClose: () -> Unit, onChangePhoto: (() -> U
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(info.uid, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (info.badge > 0) {
+                            Spacer(Modifier.height(8.dp))
+                            BadgeLabel(info.badge)
+                        }
+                        if (info.isMe && info.badgeScore >= 0) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                if (info.badgeNext > 0) "৩০ দিনের স্কোর ${info.badgeScore} · পরের স্তরে আরও ${info.badgeNext - info.badgeScore} পয়েন্ট"
+                                else "৩০ দিনের স্কোর ${info.badgeScore} · সর্বোচ্চ স্তরে আছেন",
+                                fontSize = 12.sp, color = Muted
+                            )
+                        }
                         if (info.online != null) {
                             Spacer(Modifier.height(8.dp))
                             Text(

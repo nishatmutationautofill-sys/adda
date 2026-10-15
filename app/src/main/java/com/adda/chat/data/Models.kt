@@ -12,7 +12,13 @@ data class Me(
     val friends: List<String>,
     val requests: List<String>,
     val discoverable: Boolean = false,
-    val profilePhoto: String? = null
+    val profilePhoto: String? = null,
+    /** আমি যাদের ব্লক করেছি */
+    val blocked: List<String> = emptyList(),
+    /** সক্রিয়তা ব্যাচ: স্তর (০-৪), ৩০ দিনের স্কোর, পরের স্তরের স্কোর (০ = সর্বোচ্চ স্তর) */
+    val badgeLevel: Int = 0,
+    val badgeScore: Int = 0,
+    val badgeNext: Int = 0
 )
 
 data class DiscoverableUser(val uid: String, val username: String, val profilePhoto: String?)
@@ -75,7 +81,11 @@ fun parseMe(o: JSONObject): Me = Me(
     friends = o.optJSONArray("friends").toStringList(),
     requests = o.optJSONArray("friendRequests").toStringList(),
     discoverable = o.optBoolean("discoverable", false),
-    profilePhoto = if (o.isNull("profilePhoto")) null else o.optString("profilePhoto").takeIf { it.isNotBlank() }
+    profilePhoto = if (o.isNull("profilePhoto")) null else o.optString("profilePhoto").takeIf { it.isNotBlank() },
+    blocked = o.optJSONArray("blocked").toStringList(),
+    badgeLevel = o.optJSONObject("badge")?.optInt("level", 0) ?: 0,
+    badgeScore = o.optJSONObject("badge")?.optInt("score", 0) ?: 0,
+    badgeNext = o.optJSONObject("badge")?.optInt("next", 0) ?: 0
 )
 
 fun parseMessage(o: JSONObject): ChatMessage = ChatMessage(

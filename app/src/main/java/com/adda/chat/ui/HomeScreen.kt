@@ -125,6 +125,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
     LaunchedEffect(tab) { if (tab == 1) Session.refreshDiscoverableUsers() }
     var showAddField by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    var showBlocked by remember { mutableStateOf(false) }
     var friendUid by remember { mutableStateOf("") }
     var friendSearch by remember { mutableStateOf("") }
     var peopleTab by remember { mutableStateOf(0) }
@@ -160,7 +161,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                     }
                     Box(
                         Modifier.size(42.dp).clip(CircleShape).border(2.dp, Color(0xFFD8E7FA), CircleShape)
-                            .clickable { profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true) },
+                            .clickable { profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true, badge = me.badgeLevel, badgeScore = me.badgeScore, badgeNext = me.badgeNext) },
                         contentAlignment = Alignment.Center
                     ) { Avatar(me.username, 38.dp, photoUrl = me.profilePhoto) }
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
@@ -170,6 +171,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                         DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
                             menuOpen = false; clipboard.setText(AnnotatedString(me.uid)); Session.toast("আপনার আইডি কপি হয়েছে")
                         })
+                        DropdownMenuItem(text = { Text("ব্লক করা ব্যবহারকারী") }, onClick = { menuOpen = false; showBlocked = true })
                         DropdownMenuItem(text = { Text("লগআউট") }, onClick = { menuOpen = false; Session.logout() })
                     }
                 }
@@ -266,7 +268,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             }
             items(sortedFriends, key = { "chat_$it" }) { uid ->
                 ChatListRow(uid, onAvatarClick = {
-                    profilePopup = ProfileInfo(uid, Session.displayName(uid), Session.profilePhotos[uid], online = Session.online[uid] == true)
+                    profilePopup = ProfileInfo(uid, Session.displayName(uid), Session.profilePhotos[uid], online = Session.online[uid] == true, badge = Session.badges[uid] ?: 0)
                 })
             }
                 }
@@ -318,6 +320,26 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+    }
+
+    if (showBlocked) {
+        val blockedList = Session.me?.blocked.orEmpty()
+        AlertDialog(
+            onDismissRequest = { showBlocked = false },
+            title = { Text("ব্লক করা ব্যবহারকারী") },
+            text = {
+                if (blockedList.isEmpty()) Text("কাউকে ব্লক করা নেই")
+                else Column {
+                    blockedList.forEach { id ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(Session.displayName(id), modifier = Modifier.weight(1f), color = Ink)
+                            TextButton(onClick = { Session.unblockUser(id) }) { Text("আনব্লক") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showBlocked = false }) { Text("বন্ধ করুন") } }
+        )
     }
 
     profilePopup?.let { info ->
@@ -420,10 +442,18 @@ private fun ChatListRow(uid: String, onAvatarClick: () -> Unit) {
             )
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    Session.displayName(uid), fontWeight = if (unread > 0) FontWeight.ExtraBold else FontWeight.SemiBold,
-                    fontSize = 16.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        Session.displayName(uid), fontWeight = if (unread > 0) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        fontSize = 16.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    val level = Session.badges[uid] ?: 0
+                    if (level > 0) {
+                        Spacer(Modifier.size(6.dp))
+                        BadgeIcon(level, 16.dp)
+                    }
+                }
                 Spacer(Modifier.height(2.dp))
                 Text(
                     subtitle, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

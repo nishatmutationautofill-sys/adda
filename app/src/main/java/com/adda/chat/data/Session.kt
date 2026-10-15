@@ -62,6 +62,8 @@ object Session {
 
     val names = mutableStateMapOf<String, String>()
     val profilePhotos = mutableStateMapOf<String, String>()
+    /** বন্ধুদের সক্রিয়তা ব্যাচের স্তর (০-৪) */
+    val badges = mutableStateMapOf<String, Int>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
     /** চ্যাট লিস্টে শেষ মেসেজের প্রিভিউ (শুধু মেমরিতে থাকে — এনক্রিপ্টেড মেসেজ ডিস্কে সেভ হয় না) */
@@ -289,6 +291,7 @@ object Session {
         seenIds.clear()
         pendingSecureExpiries.clear()
         names.clear()
+        badges.clear()
         profilePhotos.clear()
         online.clear()
         unread.clear()
@@ -306,18 +309,58 @@ object Session {
             return
         }
         val current = me ?: return
-        val ids = (current.friends + current.requests).distinct()
+        val ids = (current.friends + current.requests + current.blocked).distinct()
         coroutineScope {
             ids.map { uid ->
                 async {
                     try {
                         val p = Api.getObj("/api/users/${Uri.encode(uid)}")
                         names[uid] = p.optString("username", uid).ifEmpty { uid }
+                        badges[uid] = p.optInt("badge", 0)
                         p.optString("profilePhoto").takeIf { it.isNotBlank() && it != "null" }?.let { profilePhotos[uid] = it }
                     } catch (_: Exception) {
                     }
                 }
             }.awaitAll()
+        }
+    }
+
+    // ---------- আনফ্রেন্ড / ব্লক ----------
+
+    private suspend fun afterFriendshipRemoved(uid: String) {
+        if (activeFriend == uid) closeConversation()
+        unread.remove(uid)
+        lastPreview.remove(uid)
+        refreshPeople()
+    }
+
+    fun unfriend(uid: String) {
+        scope.launch {
+            try {
+                Api.postObj("/api/friends/unfriend", JSONObject().put("uid", uid))
+                afterFriendshipRemoved(uid)
+                toast("বন্ধু তালিকা থেকে সরানো হয়েছে")
+            } catch (e: Api.ApiException) { toast(e.message) }
+        }
+    }
+
+    fun blockUser(uid: String) {
+        scope.launch {
+            try {
+                Api.postObj("/api/friends/block", JSONObject().put("uid", uid))
+                afterFriendshipRemoved(uid)
+                toast("ব্লক করা হয়েছে")
+            } catch (e: Api.ApiException) { toast(e.message) }
+        }
+    }
+
+    fun unblockUser(uid: String) {
+        scope.launch {
+            try {
+                Api.postObj("/api/friends/unblock", JSONObject().put("uid", uid))
+                refreshPeople()
+                toast("আনব্লক করা হয়েছে")
+            } catch (e: Api.ApiException) { toast(e.message) }
         }
     }
 
@@ -654,7 +697,7 @@ object Session {
                         retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     } finally { retriever.release() }
                     if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
-                    if (durationMs > 60L * 1000L) throw IllegalArgumentException("১ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
+                    if (durationMs > 120L * 1000L) throw IllegalArgumentException("২ মিনিটের বেশি ভিডিও পাঠানো যাবে না")
                     mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে…"
                     val converted = VideoTranscoder.transcode(appContext, uri, durationMs)
                     if (converted != null) {
@@ -825,6 +868,10 @@ object Session {
                 refreshPeople()
                 toast("${o?.optString("username")?.ifEmpty { null } ?: o?.optString("uid").orEmpty()} আপনার রিকুয়েস্ট গ্রহণ করেছেন")
             }
+        }
+        s.on("friend:removed") { args ->
+            val uid = (args.firstOrNull() as? JSONObject)?.optString("uid").orEmpty()
+            if (uid.isNotEmpty()) scope.launch { afterFriendshipRemoved(uid) }
         }
         s.on("friend:rejected") {
             scope.launch { toast("আপনার ফ্রেন্ড রিকুয়েস্ট গ্রহণ করা হয়নি") }

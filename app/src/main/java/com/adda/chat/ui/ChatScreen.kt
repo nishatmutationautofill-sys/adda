@@ -74,6 +74,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -120,6 +123,9 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var viewerSecure by remember { mutableStateOf(false) }
     var selectedDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showProfile by remember { mutableStateOf(false) }
+    var headerMenu by remember { mutableStateOf(false) }
+    var attachMenu by remember { mutableStateOf(false) }
+    var confirmAction by remember { mutableStateOf<String?>(null) }
     var showEmojiPack by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -174,7 +180,14 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     modifier = Modifier.clip(CircleShape).clickable { showProfile = true }
                 )
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Navy, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(Session.displayName(uid), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Navy, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        val level = Session.badges[uid] ?: 0
+                        if (level > 0) {
+                            Spacer(Modifier.size(6.dp))
+                            BadgeIcon(level, 16.dp)
+                        }
+                    }
                     Text(
                         if (Session.online[uid] == true) "অনলাইন" else "অফলাইন",
                         fontSize = 12.sp,
@@ -186,6 +199,13 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 }
                 IconButton(onClick = { requestCallPermission("video") { CallManager.startCall("video", uid) } }) {
                     Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Navy)
+                }
+                Box {
+                    IconButton(onClick = { headerMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "আরও", tint = Navy) }
+                    DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
+                        DropdownMenuItem(text = { Text("আনফ্রেন্ড করুন") }, onClick = { headerMenu = false; confirmAction = "unfriend" })
+                        DropdownMenuItem(text = { Text("ব্লক করুন", color = Danger) }, onClick = { headerMenu = false; confirmAction = "block" })
+                    }
                 }
             }
         }
@@ -306,11 +326,18 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { picker.launch("*/*") }) { Icon(Icons.Filled.AttachFile, contentDescription = "ফাইল", tint = Accent) }
+                    Box {
+                        IconButton(onClick = { attachMenu = true }) { Icon(Icons.Filled.AttachFile, contentDescription = "সংযুক্ত করুন", tint = Accent) }
+                        DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                            DropdownMenuItem(text = { Text("ছবি") }, onClick = { attachMenu = false; picker.launch("image/*") })
+                            DropdownMenuItem(text = { Text("ভিডিও (২ মিনিট পর্যন্ত)") }, onClick = { attachMenu = false; picker.launch("video/*") })
+                            DropdownMenuItem(text = { Text("অন্য ফাইল") }, onClick = { attachMenu = false; picker.launch("*/*") })
+                        }
+                    }
                     IconButton(onClick = {
-                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
+                        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).putExtra(MediaStore.EXTRA_DURATION_LIMIT, 120).putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
                         try { videoCapture.launch(intent) } catch (_: Exception) { Toast.makeText(ctx, "ক্যামেরা অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show() }
-                    }) { Icon(Icons.Filled.Videocam, contentDescription = "১ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
+                    }) { Icon(Icons.Filled.Videocam, contentDescription = "২ মিনিট পর্যন্ত ভিডিও", tint = Accent) }
                     TextField(
                         value = input,
                         onValueChange = { input = it },
@@ -372,11 +399,32 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         )
     }
 
+    confirmAction?.let { act ->
+        val friendName = Session.displayName(uid)
+        AlertDialog(
+            onDismissRequest = { confirmAction = null },
+            title = { Text(if (act == "block") "ব্লক করবেন?" else "আনফ্রেন্ড করবেন?") },
+            text = {
+                Text(
+                    if (act == "block") "$friendName কে ব্লক করলে সে আপনাকে মেসেজ বা কল করতে পারবে না এবং বন্ধু তালিকা থেকে সরে যাবে। পরে আনব্লক করা যাবে।"
+                    else "$friendName আপনার বন্ধু তালিকা থেকে সরে যাবে। চাইলে পরে আবার রিকুয়েস্ট পাঠানো যাবে।"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmAction = null
+                    if (act == "block") Session.blockUser(uid) else Session.unfriend(uid)
+                }) { Text(if (act == "block") "ব্লক করুন" else "আনফ্রেন্ড", color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmAction = null }) { Text("বাতিল") } }
+        )
+    }
+
     if (showProfile) {
         ProfilePopup(
             info = ProfileInfo(
                 uid, Session.displayName(uid), Session.profilePhotos[uid],
-                online = Session.online[uid] == true
+                online = Session.online[uid] == true, badge = Session.badges[uid] ?: 0
             ),
             onClose = { showProfile = false }
         )

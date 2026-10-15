@@ -32,15 +32,15 @@ import kotlin.coroutines.resume
  * কনভার্ট ব্যর্থ হলে null দেয়; তখন কলার আসল ফাইলই পাঠায়, অ্যাপ ক্র্যাশ করে না।
  */
 object VideoTranscoder {
-    private const val MAX_INPUT_DURATION_MS = 60L * 1000L
+    private const val MAX_INPUT_DURATION_MS = 120L * 1000L
     private const val MAX_OUTPUT_BYTES = 50L * 1024L * 1024L
-    private const val TIMEOUT_MS = 120_000L
+    private const val TIMEOUT_MS = 240_000L
 
     data class Result(val file: File, val durationMs: Long)
 
     suspend fun transcode(context: Context, sourceUri: Uri, durationMs: Long): Result? {
         require(durationMs in 1..MAX_INPUT_DURATION_MS) {
-            if (durationMs > MAX_INPUT_DURATION_MS) "১ মিনিটের বেশি ভিডিও পাঠানো যাবে না" else "ভিডিওর দৈর্ঘ্য পড়া যায়নি"
+            if (durationMs > MAX_INPUT_DURATION_MS) "২ মিনিটের বেশি ভিডিও পাঠানো যাবে না" else "ভিডিওর দৈর্ঘ্য পড়া যায়নি"
         }
         val dir = File(context.cacheDir, "video_transcode").apply { mkdirs() }
         dir.listFiles()?.forEach { runCatching { it.delete() } }
