@@ -9,6 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adda.chat.data.Api
@@ -34,6 +41,8 @@ fun DownloadAppScreen() {
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var refreshedAtLeastOnce by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     fun makeQr(value: String) {
         qrBitmap = null
@@ -156,12 +165,6 @@ fun DownloadAppScreen() {
                             modifier = Modifier.padding(top = 8.dp),
                             textAlign = TextAlign.Center
                         )
-                        Text(
-                            downloadUrl,
-                            color = Ink,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
                     }
                     else -> Text(
                         "Firestore-এ সঠিক ডাউনলোড URL যোগ করুন।",
@@ -179,35 +182,49 @@ fun DownloadAppScreen() {
                         fontSize = 13.sp
                     )
                 }
-                Button(
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (downloadUrl.isNotBlank()) {
+                                clipboard.setText(AnnotatedString(downloadUrl))
+                                Toast.makeText(context, "ডাউনলোড লিংক কপি হয়েছে", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !loading && downloadUrl.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("কপি লিংক")
+                    }
+                    Button(
+                        onClick = {
+                            if (downloadUrl.isNotBlank()) {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, downloadUrl)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "ডাউনলোড লিংক শেয়ার করুন"))
+                            }
+                        },
+                        enabled = !loading && downloadUrl.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("শেয়ার লিংক")
+                    }
+                }
+                OutlinedButton(
                     onClick = { scope.launch { loadFirebaseUrl() } },
                     enabled = !loading,
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
                 ) {
                     Text(if (refreshedAtLeastOnce) "লিংক আবার লোড করুন" else "Firebase থেকে লিংক আনুন")
                 }
-            }
-        }
-
-        Card(
-            Modifier.fillMaxWidth().padding(top = 14.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEDEAFF)),
-            shape = RoundedCornerShape(18.dp)
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("একবার Firestore-এ সেট করলেই হবে", fontWeight = FontWeight.Bold, color = Ink)
-                Text(
-                    "Firebase Console → Firestore → appConfig → runtime ডকুমেন্টে apkUrl নামে String field রাখুন এবং APK-এর পাবলিক HTTPS শেয়ার লিংক দিন।",
-                    color = Ink,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(top = 5.dp)
-                )
-                Text(
-                    "Google Drive-এর লিংক স্ক্যান করলে Drive-এর ডাউনলোড/প্রিভিউ পেজ খুলতে পারে; ব্যবহারকারীকে সেখান থেকে Download চাপতে হতে পারে।",
-                    color = Ink,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
             }
         }
     }

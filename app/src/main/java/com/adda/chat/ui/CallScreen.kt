@@ -1,8 +1,11 @@
 package com.adda.chat.ui
 
 import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -43,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,6 +60,21 @@ import kotlinx.coroutines.delay
 @Composable
 fun CallScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit) {
     BackHandler(enabled = true) { /* কল চলাকালে ব্যাক বাটন বন্ধ */ }
+    val context = LocalContext.current
+    val screenShareLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            try {
+                // FLAG_SECURE blocks Android MediaProjection, so clear it only after explicit user consent.
+                (context as? Activity)?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                com.adda.chat.service.ScreenShareService.start(context, result.resultCode, data)
+            } catch (_: Exception) {
+                Session.toast("স্ক্রিন শেয়ার সার্ভিস চালু করা যায়নি")
+            }
+        } else {
+            Session.toast("স্ক্রিন শেয়ারের অনুমতি দেওয়া হয়নি")
+        }
+    }
 
     // কলের সময় স্ট্যাটাস বারের আইকন সাদা
     val view = LocalView.current
@@ -62,7 +82,11 @@ fun CallScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         val window = (view.context as? Activity)?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
         controller?.isAppearanceLightStatusBars = false
-        onDispose { controller?.isAppearanceLightStatusBars = true }
+        onDispose {
+            controller?.isAppearanceLightStatusBars = true
+            // Screen capture ends with the call screen; restore screenshot protection.
+            window?.setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE, android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     val phase = CallManager.phase
@@ -139,6 +163,12 @@ fun CallScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         tint = if (CallManager.speakerOn) Color.Black else Color.White
                     ) { CallManager.toggleSpeaker() }
                     if (isVideo) {
+                        if (phase == Phase.Connected && !CallManager.screenSharing) {
+                            RoundButton(Icons.Filled.Cast, Color(0xFF1677FF), "স্ক্রিন শেয়ার", 56.dp) {
+                                val manager = context.getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                screenShareLauncher.launch(manager.createScreenCaptureIntent())
+                            }
+                        }
                         RoundButton(
                             if (CallManager.camOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
                             if (CallManager.camOff) Color.White else Color(0x33FFFFFF),

@@ -34,32 +34,32 @@ import androidx.compose.ui.platform.LocalContext
 import com.adda.chat.data.Api
 
 // ---- আড্ডা নীল-সাদা থিম (হোম স্ক্রিনের হেডার থেকে নেওয়া) ----
-val Accent = Color(0xFF1769D2)
-val AccentLight = Color(0xFF3B8CF0)
-val Navy = Color(0xFF174A8B)
-val Canvas = Color(0xFFF3F8FE)
-val Ink = Color(0xFF0F2A4A)
-val Muted = Color(0xFF6B7F99)
-val Line = Color(0xFFD8E7FA)
-val Them = Color(0xFFEAF2FE)
-val ChipBorder = Color(0xFFD2E3FA)
+val Accent = Color(0xFF6654F1)
+val AccentLight = Color(0xFF8B7CFF)
+val Navy = Color(0xFF30256F)
+val Canvas = Color(0xFFF8F7FF)
+val Ink = Color(0xFF211B43)
+val Muted = Color(0xFF77718F)
+val Line = Color(0xFFE7E2FA)
+val Them = Color(0xFFF0EDFF)
+val ChipBorder = Color(0xFFDED7FF)
 val Danger = Color(0xFFE5484D)
 val Success = Color(0xFF1FA86A)
 val Sunny = Color(0xFFFFB02E)
 val BubbleBrush: Brush = SolidColor(Accent)
 /** অনলাইন বন্ধুদের রিং */
-val StoryRing = Brush.sweepGradient(listOf(Accent, Color(0xFF5BA8F5), Accent))
+val StoryRing = Brush.sweepGradient(listOf(Accent, Color(0xFFB7AEFF), Accent))
 /** চ্যাটের পেছনের হালকা নীল ব্যাকগ্রাউন্ড */
-val ChatBackdrop = Brush.verticalGradient(listOf(Canvas, Color(0xFFEAF2FE)))
+val ChatBackdrop = Brush.verticalGradient(listOf(Canvas, Color(0xFFF0EDFF)))
 
 /** প্রোফাইল ছবি না থাকলে নাম অনুযায়ী নীল-ঘরানার আলাদা আলাদা রং */
 private val avatarPalette = listOf(
-    listOf(Color(0xFF1769D2), Color(0xFF3B8CF0)),
-    listOf(Color(0xFF0E7490), Color(0xFF1769D2)),
-    listOf(Color(0xFF3D5AFE), Color(0xFF1769D2)),
-    listOf(Color(0xFF0F9D8A), Color(0xFF1769D2)),
-    listOf(Color(0xFF174A8B), Color(0xFF3B8CF0)),
-    listOf(Color(0xFF2F6FE0), Color(0xFF6BB0FF))
+    listOf(Color(0xFF6654F1), Color(0xFF9A8FFF)),
+    listOf(Color(0xFF6D5CE7), Color(0xFF8E80FF)),
+    listOf(Color(0xFF8A63F6), Color(0xFF6654F1)),
+    listOf(Color(0xFF6E70D8), Color(0xFF6654F1)),
+    listOf(Color(0xFF30256F), Color(0xFF8B7CFF)),
+    listOf(Color(0xFF6654F1), Color(0xFFC0B8FF))
 )
 fun avatarBrush(name: String): Brush =
     Brush.linearGradient(avatarPalette[(name.hashCode() and 0x7fffffff) % avatarPalette.size])

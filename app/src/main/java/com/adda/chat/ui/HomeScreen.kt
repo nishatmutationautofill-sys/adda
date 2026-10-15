@@ -136,36 +136,36 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
     }
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
-        // Compact blue-and-white top banner
+        // Compact light-violet top banner
         Surface(
             modifier = Modifier.fillMaxWidth().zIndex(1f),
-            color = Color.White,
+            color = Color(0xFFE8E0FF),
             shadowElevation = 4.dp,
             shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
         ) {
             Column(
-                Modifier.fillMaxWidth().background(Color.White).statusBarsPadding()
+                Modifier.fillMaxWidth().background(Color(0xFFE8E0FF)).statusBarsPadding()
                     .padding(start = 12.dp, end = 10.dp, top = 6.dp, bottom = 10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF1769D2)),
+                        Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF6654F1)),
                         contentAlignment = Alignment.Center
                     ) { Text("A", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black) }
                     Spacer(Modifier.size(9.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("আড্ডা Messenger", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF174A8B), maxLines = 1)
+                        Text("আড্ডা Messenger", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF30256F), maxLines = 1)
                         Text(Session.connectionLabel, fontSize = 11.sp,
                             color = if (Session.socketConnected) Color(0xFF168653) else Muted,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Box(
-                        Modifier.size(42.dp).clip(CircleShape).border(2.dp, Color(0xFFD8E7FA), CircleShape)
+                        Modifier.size(42.dp).clip(CircleShape).border(2.dp, Color(0xFFE7E2FA), CircleShape)
                             .clickable { profilePopup = ProfileInfo(me.uid, me.username, me.profilePhoto, online = true, isMe = true, badge = me.badgeLevel, badgeScore = me.badgeScore, badgeNext = me.badgeNext) },
                         contentAlignment = Alignment.Center
                     ) { Avatar(me.username, 38.dp, photoUrl = me.profilePhoto) }
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color(0xFF174A8B))
+                        Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color(0xFF30256F))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("আমার আইডি কপি") }, onClick = {
@@ -182,11 +182,11 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                     CompactAction(Icons.Filled.PersonAdd, "বন্ধু যোগ", Modifier.weight(1.05f), active = showAddField) { showAddField = !showAddField }
                     Row(
                         Modifier.weight(1.12f).height(36.dp).clip(RoundedCornerShape(50))
-                            .background(Color(0xFFEAF2FE)).border(1.dp, Color(0xFFD2E3FA), RoundedCornerShape(50))
+                            .background(Color(0xFFF7F4FF)).border(1.dp, Color(0xFFD5C9FA), RoundedCornerShape(50))
                             .padding(start = 8.dp, end = 2.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("বন্ধু চাই", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF174A8B), maxLines = 1)
+                        Text("বন্ধু চাই", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF30256F), maxLines = 1)
                         Switch(checked = me.discoverable, onCheckedChange = { Session.setDiscoverable(it) }, modifier = Modifier.scale(0.68f))
                     }
                 }
@@ -197,13 +197,13 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                             value = friendUid, onValueChange = { friendUid = it },
                             placeholder = { Text("বন্ধুর আইডি") }, singleLine = true,
                             shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF1769D2), unfocusedBorderColor = Line,
-                                focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFF7FAFF)),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF6654F1), unfocusedBorderColor = Line,
+                                focusedContainerColor = Color.White, unfocusedContainerColor = Color(0xFFFAF9FF)),
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(Modifier.size(8.dp))
                         Box(Modifier.size(44.dp).clip(CircleShape)
-                            .background(if (friendUid.isNotBlank()) Color(0xFF1769D2) else Line)
+                            .background(if (friendUid.isNotBlank()) Color(0xFF6654F1) else Line)
                             .clickable(enabled = friendUid.isNotBlank()) {
                                 Session.sendFriendRequest(friendUid) { friendUid = ""; showAddField = false }
                             }, contentAlignment = Alignment.Center

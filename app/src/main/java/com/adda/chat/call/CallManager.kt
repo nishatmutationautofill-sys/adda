@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.content.Intent
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
@@ -36,6 +37,7 @@ import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
@@ -437,6 +439,61 @@ object CallManager {
         pendingCandidates.clear()
     }
 
+    // ---------------------------------------------------------------- screen sharing
+
+    var screenSharing by mutableStateOf(false)
+        private set
+
+    /** Android-এর user-consent result পাওয়ার পর বর্তমান ভিডিও ট্র্যাককে স্ক্রিন ক্যাপচারে বদলায়। */
+    fun startScreenShare(resultCode: Int, projectionData: Intent) {
+        if (phase == Phase.None || pc == null || resultCode != android.app.Activity.RESULT_OK) return
+        if (screenSharing) return
+        try {
+            val f = ensureFactory()
+            val p = pc ?: return
+            val oldCapturer = capturer
+            val oldSource = videoSource
+            val oldTrack = videoTrack
+            val oldHelper = surfaceHelper
+
+            try { oldCapturer?.stopCapture() } catch (_: Exception) {}
+            try { oldCapturer?.dispose() } catch (_: Exception) {}
+
+            val helper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
+            val source = f.createVideoSource(true)
+            val screenCapturer = ScreenCapturerAndroid(projectionData, object : android.media.projection.MediaProjection.Callback() {
+                override fun onStop() {
+                    screenSharing = false
+                    try { com.adda.chat.service.ScreenShareService.stop(ctx) } catch (_: Exception) {}
+                }
+            })
+            screenCapturer.initialize(helper, ctx, source.capturerObserver)
+            screenCapturer.startCapture(720, 1280, 15)
+            val track = f.createVideoTrack("screen0", source)
+            val sender = p.senders.firstOrNull { it.track()?.kind() == "video" }
+            if (sender == null || !sender.setTrack(track, false)) {
+                try { screenCapturer.stopCapture() } catch (_: Exception) {}
+                screenCapturer.dispose()
+                track.dispose(); source.dispose(); helper.dispose()
+                throw IllegalStateException("ভিডিও কলের স্ক্রিন শেয়ার ট্র্যাক তৈরি হয়নি")
+            }
+            capturer = screenCapturer
+            videoSource = source
+            videoTrack = track
+            surfaceHelper = helper
+            localVideo = track
+            camOff = false
+            screenSharing = true
+            try { oldTrack?.dispose() } catch (_: Exception) {}
+            try { oldSource?.dispose() } catch (_: Exception) {}
+            try { oldHelper?.dispose() } catch (_: Exception) {}
+            tuneSenders()
+            Session.toast("স্ক্রিন শেয়ার চালু হয়েছে")
+        } catch (e: Exception) {
+            Session.toast("স্ক্রিন শেয়ার চালু করা যায়নি: ${e.localizedMessage ?: "অজানা সমস্যা"}")
+        }
+    }
+
     // ---------------------------------------------------------------- controls
 
     fun toggleMute() {
@@ -480,10 +537,12 @@ object CallManager {
         Notifier.cancelCall(ctx)
         stopAudioMode()
         ConnectionService.setCallState(ctx, false, false)
+        try { com.adda.chat.service.ScreenShareService.stop(ctx) } catch (_: Exception) {}
         if (phase != Phase.None) playEndTone(wasOutgoing)
 
         val oldPc = pc
         val oldCapturer = capturer
+        screenSharing = false
         val oldVideoTrack = videoTrack
         val oldVideoSource = videoSource
         val oldHelper = surfaceHelper

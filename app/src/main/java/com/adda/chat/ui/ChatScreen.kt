@@ -753,7 +753,7 @@ private fun DeferredMediaCard(m: ChatMessage, onLoad: () -> Unit, onMenu: () -> 
     ) {
         // ব্লার করা রঙের ছোপ (শুধু সাজসজ্জা — আসল ছবি নয়)
         Box(Modifier.size(110.dp).offset(x = (-50).dp, y = (-30).dp).blur(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.45f)))
-        Box(Modifier.size(90.dp).offset(x = 55.dp, y = 35.dp).blur(24.dp).clip(CircleShape).background(Color(0xFF1769D2).copy(alpha = 0.35f)))
+        Box(Modifier.size(90.dp).offset(x = 55.dp, y = 35.dp).blur(24.dp).clip(CircleShape).background(Color(0xFF6654F1).copy(alpha = 0.35f)))
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),

@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -52,6 +53,13 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="remoteMessaging|microphone|camera" />
+
+        <!-- User-approved screen capture runs in a dedicated foreground service. -->
+        <service
+            android:name=".service.ScreenShareService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <!-- ফোন রিস্টার্ট বা অ্যাপ আপডেটের পর সার্ভিস আবার চালু -->
         <receiver
