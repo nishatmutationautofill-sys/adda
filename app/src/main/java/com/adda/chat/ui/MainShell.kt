@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -45,7 +47,11 @@ fun MainShell() {
 
     Column(Modifier.fillMaxSize().background(Canvas)) {
         Box(Modifier.weight(1f)) {
-            HomeScreen(tab = tab, onGoPeople = { tab = 1 })
+            when (tab) {
+                2 -> GamesScreen()
+                3 -> DownloadAppScreen()
+                else -> HomeScreen(tab = tab, onGoPeople = { tab = 1 })
+            }
         }
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp)) {
             Surface(
@@ -57,6 +63,8 @@ fun MainShell() {
                 Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     NavPill(Icons.Filled.People, "বন্ধু", tab == 0, totalUnread, Modifier.weight(1f)) { tab = 0 }
                     NavPill(Icons.Filled.PersonAdd, "আগ্রহী", tab == 1, requestCount, Modifier.weight(1f)) { tab = 1 }
+                    NavPill(Icons.Filled.SportsEsports, "গেম", tab == 2, 0, Modifier.weight(1f)) { tab = 2 }
+                    NavPill(Icons.Filled.Download, "ডাউনলোড", tab == 3, 0, Modifier.weight(1f)) { tab = 3 }
                 }
             }
         }

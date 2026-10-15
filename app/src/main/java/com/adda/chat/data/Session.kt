@@ -92,6 +92,16 @@ object Session {
         Api.token = prefs.getString("messengerToken", "").orEmpty()
         hasToken = Api.token.isNotEmpty()
         Notifier.init(appContext)
+        P2pChatManager.init(appContext)
+        P2pChatManager.onText = { from, id, text, date -> scope.launch {
+            val myUid = me?.uid ?: return@launch
+            addMessage(ChatMessage(id, from, myUid, "text", text, null, null, 0L, date))
+        } }
+        P2pChatManager.onFile = { from, id, path, name, size, date -> scope.launch {
+            val myUid = me?.uid ?: return@launch
+            val file = File(path)
+            addMessage(ChatMessage(id, from, myUid, "file", "", Uri.fromFile(file).toString(), name, size, date))
+        } }
         startServerUrlWatcher()
         startRetentionSweeper()
     }
@@ -278,6 +288,7 @@ object Session {
     }
 
     fun logout() {
+        P2pChatManager.closeAll()
         clearToken() // আগে টোকেন মুছি, যাতে কল শেষ হওয়ার সময় সার্ভিস আবার শুরু না হয়
         CallManager.endCall(true)
         ConnectionService.stop(appContext)
@@ -510,6 +521,10 @@ object Session {
 
     fun openConversation(uid: String) {
         activeFriend = uid
+        if (socketConnected) {
+            P2pChatManager.connect(uid)
+            emit("p2p:ready", JSONObject().put("to", uid))
+        }
         unread.remove(uid)
         messages.clear()
         seenIds.clear()
@@ -534,6 +549,7 @@ object Session {
     }
 
     fun closeConversation() {
+        activeFriend?.let { P2pChatManager.close(it); if (socketConnected) emit("p2p:close", JSONObject().put("to", it)) }
         activeFriend = null
         messages.clear()
         seenIds.clear()
@@ -666,6 +682,13 @@ object Session {
                     val payload = JSONObject().put("text", text).toString()
                     E2ee.encryptText(payload, me?.uid ?: throw IllegalStateException("লগইন নেই"), to, peer)
                 } else text
+                if (!secure && P2pChatManager.sendText(to, text)) {
+                    val sender = me?.uid ?: return@launch
+                    val now = System.currentTimeMillis()
+                    addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "text", text, null, null, 0L, now))
+                    onDone(true)
+                    return@launch
+                }
                 val data = JSONObject()
                     .put("to", to)
                     .put("text", wireText)
@@ -725,60 +748,34 @@ object Session {
                 } else {
                     withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
                 }
-                if (prepared.size > 50L * 1024 * 1024) throw IllegalArgumentException("সর্বোচ্চ ৫০ MB ফাইল পাঠানো যাবে")
-                val multipart = if (secure) {
-                    // শুধু Secure Me চালু থাকলে এনক্রিপ্ট হবে
-                    mediaUploadLabel = "ফাইল এনক্রিপ্ট হচ্ছে…"
-                    val plainBytes = withContext(Dispatchers.IO) {
-                        val buffer = Buffer()
-                        prepared.body.writeTo(buffer)
-                        buffer.readByteArray().also { buffer.clear() }
-                    }
-                    if (plainBytes.size > 50L * 1024 * 1024 - 16) throw IllegalArgumentException("এনক্রিপশনসহ ফাইলটি ৫০ MB ছাড়িয়ে যাচ্ছে")
-                    val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
-                    val peer = peerE2eePublicKey(to)
-                    val senderUid = me?.uid ?: throw IllegalStateException("লগইন নেই")
-                    val encrypted = withContext(Dispatchers.Default) { E2ee.encryptFile(plainBytes, senderUid, to, peer, prepared.name, mime) }
-                    val encryptedBody = encrypted.bytes.toRequestBody("application/octet-stream".toMediaType())
-                    MultipartBody.Builder().setType(MultipartBody.FORM)
-                        .addFormDataPart("file", "encrypted.bin", encryptedBody)
-                        .addFormDataPart("to", to).addFormDataPart("encrypted", "true")
-                        .addFormDataPart("envelope", encrypted.envelope).addFormDataPart("secure", "true")
-                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
-                        .apply { if (replyTo != null) addFormDataPart("replyTo", JSONObject().put("id", replyTo).toString()) }.build()
-                } else {
-                    MultipartBody.Builder().setType(MultipartBody.FORM)
-                        .addFormDataPart("file", prepared.name, prepared.body)
-                        .addFormDataPart("to", to).addFormDataPart("encrypted", "false")
-                        .addFormDataPart("secure", "false")
-                        .addFormDataPart("ttlSeconds", ttlSeconds.coerceIn(1, 60).toString())
-                        .apply { if (replyTo != null) addFormDataPart("replyTo", JSONObject().put("id", replyTo).toString()) }.build()
+                // P2P-only file sharing: no HTTP/server upload fallback is permitted.
+                val maxP2pBytes = 20L * 1024 * 1024
+                if (prepared.size > maxP2pBytes) {
+                    throw IllegalArgumentException("P2P-তে সর্বোচ্চ ২০ MB ফাইল পাঠানো যাবে। সার্ভার আপলোড বিকল্প বন্ধ আছে।")
                 }
-                mediaUploadLabel = "আপলোড হচ্ছে…"
-                val total = multipart.contentLength().coerceAtLeast(1L)
-                val progressBody = object : okhttp3.RequestBody() {
-                    override fun contentType() = multipart.contentType()
-                    override fun contentLength() = multipart.contentLength()
-                    override fun writeTo(sink: okio.BufferedSink) {
-                        val forwarding = object : ForwardingSink(sink) {
-                            var written = 0L
-                            override fun write(source: Buffer, byteCount: Long) {
-                                super.write(source, byteCount)
-                                written += byteCount
-                                mediaUploadProgress = (written.toFloat() / total).coerceIn(0f, 1f)
-                            }
-                        }.buffer()
-                        multipart.writeTo(forwarding)
-                        forwarding.flush()
-                    }
+                if (secure) {
+                    throw IllegalArgumentException("P2P-only মোডে Secure Me ফাইল পাঠানো বর্তমানে সমর্থিত নয়। Secure Me ফাইলের সার্ভার বিকল্প বন্ধ আছে।")
                 }
-                val resp = Api.request("POST", "/api/messages/file", body = progressBody)
-                val raw = parseMessage(JSONObject(resp))
-                addMessage(hydrateMessage(raw))
-                toast(if (secure) "সিকিউর ফাইল পাঠানো হয়েছে" else "ফাইল পাঠানো হয়েছে")
+                if (!P2pChatManager.isOpen(to)) {
+                    P2pChatManager.connect(to)
+                    throw IllegalStateException("P2P সংযোগ প্রস্তুত নয়। বন্ধুকে অনলাইনে রেখে সংযোগ তৈরি হওয়া পর্যন্ত অপেক্ষা করে আবার চেষ্টা করুন। কোনো সার্ভার আপলোড করা হয়নি।")
+                }
+                val buffer = Buffer()
+                withContext(Dispatchers.IO) { prepared.body.writeTo(buffer) }
+                val bytes = buffer.readByteArray()
+                val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
+                if (!P2pChatManager.sendFile(to, prepared.name, mime, bytes)) {
+                    throw IllegalStateException("P2P ফাইল ট্রান্সফার ব্যর্থ হয়েছে। বিকল্প সার্ভার আপলোড বন্ধ আছে; আবার চেষ্টা করুন।")
+                }
+                val local = File(appContext.cacheDir, "p2p_sent_${java.util.UUID.randomUUID()}_${prepared.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
+                withContext(Dispatchers.IO) { local.writeBytes(bytes) }
+                val sender = me?.uid ?: throw IllegalStateException("লগইন নেই")
+                addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "file", "", Uri.fromFile(local).toString(), prepared.name, bytes.size.toLong(), System.currentTimeMillis()))
+                mediaUploadProgress = 1f
+                toast("ফাইল সরাসরি P2P-তে পাঠানো হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }
             catch (e: IllegalArgumentException) { toast(e.message) }
-            catch (e: Exception) { toast("এনক্রিপ্টেড ফাইল পাঠানো যায়নি: ${e.message}") }
+            catch (e: Exception) { toast("P2P ফাইল পাঠানো যায়নি: ${e.message}") }
             catch (e: OutOfMemoryError) { toast("মেমরি কম পড়েছে, ছোট ফাইল পাঠান") }
             catch (e: Throwable) { toast("ফাইল পাঠানো যায়নি: ${e.javaClass.simpleName}") }
             finally {
@@ -930,6 +927,11 @@ object Session {
         for (ev in listOf("offer", "answer", "candidate", "hangup")) {
             s.on("webrtc:$ev") { args ->
                 (args.firstOrNull() as? JSONObject)?.let { o -> scope.launch { CallManager.onSignal(ev, o) } }
+            }
+        }
+        for (ev in listOf("offer", "answer", "candidate", "close")) {
+            s.on("p2p:$ev") { args ->
+                (args.firstOrNull() as? JSONObject)?.let { o -> scope.launch { P2pChatManager.onSignal(ev, o) } }
             }
         }
         s.connect()

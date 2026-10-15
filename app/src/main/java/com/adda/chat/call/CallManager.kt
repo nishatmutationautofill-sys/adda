@@ -90,6 +90,9 @@ object CallManager {
     private var vibrator: Vibrator? = null
     private var ringbackTone: ToneGenerator? = null
     private var timeoutJob: Job? = null
+    // সাময়িক নেটওয়ার্ক ড্রপ হলে সঙ্গে সঙ্গে কল না কেটে ১২ সেকেন্ড পুনঃসংযোগের সুযোগ দিন।
+    private var iceDisconnectJob: Job? = null
+    private const val ICE_DISCONNECT_GRACE_MS = 12_000L
     private const val OUTGOING_TIMEOUT_MS = 45_000L
     private const val INCOMING_TIMEOUT_MS = 50_000L
     private var prevAudioMode = AudioManager.MODE_NORMAL
@@ -124,7 +127,9 @@ object CallManager {
         val cfg = PeerConnection.RTCConfiguration(
             listOf(
                 PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer()
             )
         ).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -199,10 +204,30 @@ object CallManager {
             Session.scope.launch {
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED,
-                    PeerConnection.IceConnectionState.COMPLETED -> markConnected()
+                    PeerConnection.IceConnectionState.COMPLETED -> {
+                        iceDisconnectJob?.cancel()
+                        iceDisconnectJob = null
+                        markConnected()
+                    }
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        // মোবাইল নেটওয়ার্কে ক্ষণস্থায়ী packet loss বা Wi-Fi handoff-এ
+                        // ICE সাময়িক DISCONNECTED হতে পারে; সঙ্গে সঙ্গে কল শেষ করবেন না।
+                        iceDisconnectJob?.cancel()
+                        iceDisconnectJob = Session.scope.launch {
+                            delay(ICE_DISCONNECT_GRACE_MS)
+                            if (phase != Phase.None &&
+                                pc?.iceConnectionState() == PeerConnection.IceConnectionState.DISCONNECTED
+                            ) {
+                                Session.toast("নেটওয়ার্ক সংযোগ ফিরছে না। কল শেষ করা হচ্ছে; TURN সার্ভার লাগতে পারে।")
+                                endCall(true)
+                            }
+                        }
+                    }
                     PeerConnection.IceConnectionState.FAILED -> {
+                        iceDisconnectJob?.cancel()
+                        iceDisconnectJob = null
                         if (phase != Phase.None) {
-                            Session.toast("কল সংযোগ ব্যর্থ। TURN সার্ভার প্রয়োজন হতে পারে।")
+                            Session.toast("কল সংযোগ ব্যর্থ। Google STUN যথেষ্ট না হলে TURN সার্ভার প্রয়োজন হতে পারে।")
                             endCall(true)
                         }
                     }
@@ -450,6 +475,8 @@ object CallManager {
         stopRingtone()
         stopRingback()
         cancelTimeout()
+        iceDisconnectJob?.cancel()
+        iceDisconnectJob = null
         Notifier.cancelCall(ctx)
         stopAudioMode()
         ConnectionService.setCallState(ctx, false, false)

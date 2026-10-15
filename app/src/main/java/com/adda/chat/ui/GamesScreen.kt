@@ -1,0 +1,140 @@
+package com.adda.chat.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Redeem
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.adda.chat.data.Api
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+
+private data class GameRow(val rank: Int, val username: String, val score: Int)
+
+@Composable
+fun GamesScreen() {
+    var selectedGame by remember { mutableStateOf("tap-rush") }
+    var score by remember { mutableIntStateOf(0) }
+    var seconds by remember { mutableIntStateOf(30) }
+    var playing by remember { mutableStateOf(false) }
+    var best by remember { mutableIntStateOf(0) }
+    var leaderboard by remember { mutableStateOf<List<GameRow>>(emptyList()) }
+    var status by remember { mutableStateOf("গেম বেছে নিয়ে খেলা শুরু করুন।") }
+    var showClaim by remember { mutableStateOf(false) }
+    var method by remember { mutableStateOf("bkash") }
+    var phone by remember { mutableStateOf("") }
+    var claimStatus by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    fun refreshBoard() {
+        scope.launch {
+            try {
+                val obj = Api.getObj("/api/games/leaderboard?gameId=$selectedGame")
+                val arr = obj.optJSONArray("leaderboard")
+                leaderboard = (0 until (arr?.length() ?: 0)).map { i ->
+                    val row = arr!!.getJSONObject(i)
+                    GameRow(row.optInt("rank"), row.optString("username", "Player"), row.optInt("score"))
+                }
+            } catch (e: Exception) { status = e.message ?: "লিডারবোর্ড লোড করা যায়নি" }
+        }
+    }
+
+    LaunchedEffect(selectedGame) { refreshBoard() }
+    LaunchedEffect(playing) {
+        if (playing) {
+            while (seconds > 0 && playing) { delay(1000); seconds-- }
+            if (seconds <= 0 && playing) {
+                playing = false
+                best = maxOf(best, score)
+                try {
+                    Api.postObj("/api/games/score", JSONObject().put("gameId", selectedGame).put("score", score).put("durationSeconds", 30))
+                    status = "স্কোর সার্ভারে জমা হয়েছে। যোগ্যতা যাচাই করে Claim Reward ব্যবহার করুন।"
+                    refreshBoard()
+                } catch (e: Exception) { status = "স্কোর জমা হয়নি: ${e.message ?: "সার্ভার সমস্যা"}" }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Canvas).statusBarsPadding().padding(horizontal = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)) {
+            Icon(Icons.Filled.Gamepad, null, tint = Color(0xFF6957D5), modifier = Modifier.size(32.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("Adda Games", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+                Text("খেলুন • স্কোর করুন • রিওয়ার্ডের আবেদন করুন", fontSize = 12.sp, color = Muted)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            listOf("tap-rush" to "Tap Rush", "math-sprint" to "Math Sprint", "memory-match" to "Memory Match").forEach { (id, label) ->
+                Surface(color = if (selectedGame == id) Color(0xFF6957D5) else Color.White, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f).clickable(enabled = !playing) { selectedGame = id; score = 0; seconds = 30 }) {
+                    Text(label, color = if (selectedGame == id) Color.White else Ink, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp))
+                }
+            }
+        }
+        Card(Modifier.fillMaxWidth().padding(top = 14.dp), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(when (selectedGame) { "math-sprint" -> "Math Sprint"; "memory-match" -> "Memory Match"; else -> "Tap Rush" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(if (playing) "সময় বাকি: $seconds সেকেন্ড" else "৩০ সেকেন্ডে যত বেশি সম্ভব পয়েন্ট অর্জন করুন", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                Text(score.toString(), fontSize = 52.sp, fontWeight = FontWeight.Black, color = Color(0xFF6957D5), modifier = Modifier.padding(vertical = 8.dp))
+                Button(onClick = {
+                    if (!playing) { score = 0; seconds = 30; playing = true; status = "খেলা চলছে…" }
+                    else score += when (selectedGame) { "math-sprint" -> 2; "memory-match" -> 3; else -> 1 }
+                }, enabled = playing || seconds == 30, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Text(if (playing) when (selectedGame) { "math-sprint" -> "সঠিক উত্তর! (+2)"; "memory-match" -> "কার্ড মেলান! (+3)"; else -> "এখানে ট্যাপ করুন! (+1)" } else "খেলা শুরু করুন", fontWeight = FontWeight.Bold)
+                }
+                Text("সেরা স্কোর: $best", color = Muted, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { refreshBoard() }, modifier = Modifier.weight(1f)) { Icon(Icons.Filled.EmojiEvents, null); Spacer(Modifier.width(5.dp)); Text("দৈনিক হাইস্কোর") }
+            Button(onClick = { showClaim = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Filled.Redeem, null); Spacer(Modifier.width(5.dp)); Text("Claim Reward") }
+        }
+        Text(status, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+        Text("আজকের লিডারবোর্ড", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(bottom = 6.dp))
+        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(leaderboard) { row ->
+                Surface(color = Color.White, shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("#${row.rank}", color = Color(0xFF6957D5), fontWeight = FontWeight.ExtraBold, modifier = Modifier.width(42.dp))
+                        Text(row.username, color = Ink, modifier = Modifier.weight(1f))
+                        Text(row.score.toString(), color = Ink, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            if (leaderboard.isEmpty()) item { Text("আজ এখনো কোনো স্কোর নেই। প্রথম খেলোয়াড় আপনিই হতে পারেন!", color = Muted, fontSize = 13.sp) }
+        }
+    }
+
+    if (showClaim) AlertDialog(onDismissRequest = { showClaim = false }, title = { Text("Claim Reward") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("নির্দিষ্ট স্কোর অর্জন করলে আবেদন জমা দিতে পারবেন। রিওয়ার্ডের পরিমাণ এখনো নির্ধারিত নয়; আবেদন যাচাইয়ের পর ম্যানুয়ালি ব্যবস্থা নেওয়া হবে.", fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = method == "bkash", onClick = { method = "bkash" }); Text("বিকাশ")
+                Spacer(Modifier.width(8.dp)); RadioButton(selected = method == "flexiload", onClick = { method = "flexiload" }); Text("Flexiload")
+            }
+            OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit).take(14) }, label = { Text("মোবাইল নম্বর") }, singleLine = true)
+            if (claimStatus.isNotBlank()) Text(claimStatus, color = Muted, fontSize = 12.sp)
+        }
+    }, confirmButton = { TextButton(onClick = {
+        scope.launch {
+            try {
+                val res = Api.postObj("/api/games/claim", JSONObject().put("gameId", selectedGame).put("method", method).put("accountNumber", phone))
+                claimStatus = res.optString("message", "আবেদন জমা হয়েছে; যাচাই অপেক্ষমাণ।")
+            } catch (e: Exception) { claimStatus = e.message ?: "আবেদন জমা দেওয়া যায়নি" }
+        }
+    }) { Text("আবেদন জমা দিন") } }, dismissButton = { TextButton(onClick = { showClaim = false }) { Text("বন্ধ করুন") } })
+}
