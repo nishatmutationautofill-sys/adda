@@ -3,6 +3,7 @@ package com.adda.chat.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -53,6 +55,14 @@ fun MainShell() {
                 else -> HomeScreen(tab = tab, onGoPeople = { tab = 1 })
             }
         }
+        // Start.io banner placement, shown above the app navigation.
+        // The SDK handles ad loading; when no ad is available this area may remain empty.
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 0.dp, max = 60.dp),
+            factory = { context ->
+                com.startapp.sdk.ads.banner.Banner(context)
+            }
+        )
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp)) {
             Surface(
                 shape = RoundedCornerShape(34.dp),

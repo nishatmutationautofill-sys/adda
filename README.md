@@ -166,3 +166,17 @@ Selected videos are checked against the 5-minute limit, then transcoded before E
 - **অ্যাভাটার:** ছবি না থাকলে নাম অনুযায়ী আলাদা রঙিন গ্রেডিয়েন্টে নামের প্রথম অক্ষর।
 - **চ্যাট:** বড় গোল বাবল (নিজের মেসেজ গ্রেডিয়েন্টে), হালকা রঙিন ব্যাকগ্রাউন্ড, উপরের দিকে গোল কম্পোজার।
 - **কার্ড/লিস্ট:** বেশি গোল কোণ ও নরম ছায়া, গ্রেডিয়েন্ট আনরিড ব্যাজ।
+
+## Start.io Ads Integration
+
+This project includes the Start.io Android SDK (`com.startapp:inapp-sdk:5.+`) and uses publisher App ID `209645230`.
+
+- SDK App ID is configured in `app/src/main/AndroidManifest.xml` using `com.startapp.sdk.APPLICATION_ID`.
+- A Start.io banner view is placed above the main app navigation in `MainShell.kt`.
+- Internet and network-state permissions are declared in the manifest.
+- ProGuard keep rules are included for release builds.
+
+Before publishing, sync Gradle, build and test on a real device, and verify ad delivery in the Start.io publisher dashboard. Ads may not appear when there is no fill, the app/account is not approved, or network conditions prevent loading. Review Start.io's current policy and privacy/consent requirements for your audience and regions.
+
+## Rewarded Video + Flexiload redemption
+Games tab includes Start.io Rewarded Video (10 coins per completed video, server-enforced daily cap of 10) and a manual-admin Flexiload redemption request flow for Grameenphone, Robi, Banglalink and Teletalk. Server endpoints, admin review workflow, configuration and important security limitations are documented in `../REWARDS-AND-RECHARGE-BN.md`.

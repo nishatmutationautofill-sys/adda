@@ -34,6 +34,15 @@
         android:theme="@style/Theme.Adda"
         android:usesCleartextTraffic="true">
 
+        <!-- Start.io publisher App ID -->
+        <meta-data
+            android:name="com.startapp.sdk.APPLICATION_ID"
+            android:value="209645230" />
+        <!-- Disable automatic return ads; use the in-layout banner placement instead. -->
+        <meta-data
+            android:name="com.startapp.sdk.RETURN_ADS_ENABLED"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

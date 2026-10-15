@@ -12,6 +12,16 @@ import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import com.startapp.sdk.adsbase.StartAppAd
+import com.startapp.sdk.adsbase.Ad
+import com.startapp.sdk.adsbase.AdMode
+import com.startapp.sdk.adsbase.adlisteners.AdEventListener
+import com.startapp.sdk.adsbase.adlisteners.VideoListener
+import java.util.UUID
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,7 +48,92 @@ fun GamesScreen() {
     var method by remember { mutableStateOf("bkash") }
     var phone by remember { mutableStateOf("") }
     var claimStatus by remember { mutableStateOf("") }
+    var coinBalance by remember { mutableIntStateOf(0) }
+    var videosRemaining by remember { mutableIntStateOf(10) }
+    var rewardedLoading by remember { mutableStateOf(false) }
+    var rewardMessage by remember { mutableStateOf("ভিডিও সম্পূর্ণ করলে ১০ কয়েন পাবেন।") }
+    var showRedeem by remember { mutableStateOf(false) }
+    var redeemOperator by remember { mutableStateOf("grameenphone") }
+    var redeemAmount by remember { mutableIntStateOf(10) }
+    var redeemPhone by remember { mutableStateOf("") }
+    var redeemStatus by remember { mutableStateOf("") }
+    var redeemBusy by remember { mutableStateOf(false) }
+    var redeemRequestKey by remember { mutableStateOf(UUID.randomUUID().toString()) }
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
     val scope = rememberCoroutineScope()
+
+    suspend fun refreshWallet() {
+        try {
+            val w = Api.getObj("/api/rewards/wallet")
+            coinBalance = w.optInt("balance", 0)
+            videosRemaining = w.optInt("remainingToday", 10)
+        } catch (_: Exception) { /* show a useful message when the user tries the action */ }
+    }
+
+    LaunchedEffect(Unit) { refreshWallet() }
+
+    fun watchRewardedVideo() {
+        if (rewardedLoading) return
+        if (activity == null) { rewardMessage = "এই স্ক্রিনে বিজ্ঞাপন চালু করা যাচ্ছে না।"; return }
+        rewardedLoading = true
+        rewardMessage = "বিজ্ঞাপন প্রস্তুত করা হচ্ছে…"
+        scope.launch {
+            var sessionId = ""
+            try {
+                val session = Api.postObj("/api/rewards/video/start", JSONObject())
+                sessionId = session.optString("sessionId")
+                if (sessionId.isBlank()) throw IllegalStateException("ভিডিও সেশন তৈরি হয়নি")
+                val ad = StartAppAd(activity)
+                val activeSession = sessionId
+                ad.setVideoListener(object : VideoListener {
+                    override fun onVideoCompleted() {
+                        scope.launch {
+                            try {
+                                val result = Api.postObj("/api/rewards/video/complete", JSONObject().put("sessionId", activeSession))
+                                rewardMessage = result.optString("message", "কয়েন যোগ হয়েছে")
+                                refreshWallet()
+                            } catch (e: Exception) {
+                                rewardMessage = "ভিডিও শেষ হয়েছে, কিন্তু কয়েন নিশ্চিত হয়নি। নেটওয়ার্ক ঠিক করে আবার ব্যালেন্স দেখুন।"
+                            } finally { rewardedLoading = false }
+                        }
+                    }
+                })
+                ad.loadAd(AdMode.REWARDED_VIDEO, object : AdEventListener {
+                    override fun onReceiveAd(adInfo: Ad) {
+                        activity.runOnUiThread {
+                            rewardMessage = "ভিডিও চলছে… সম্পূর্ণ দেখুন।"
+                            ad.showAd()
+                            // If the user closes the ad early and no completion callback arrives,
+                            // release the UI lock after a safety timeout without granting coins.
+                            scope.launch {
+                                delay(90_000)
+                                if (rewardedLoading) {
+                                    try { Api.postObj("/api/rewards/video/fail", JSONObject().put("sessionId", activeSession)) } catch (_: Exception) {}
+                                    rewardedLoading = false
+                                    rewardMessage = "ভিডিও সম্পূর্ণ হয়নি বা সেশন শেষ হয়েছে। কয়েন দেওয়া হয়নি; আবার চেষ্টা করতে পারেন."
+                                    refreshWallet()
+                                }
+                            }
+                        }
+                    }
+                    override fun onFailedToReceiveAd(adInfo: Ad?) {
+                        scope.launch {
+                            try { Api.postObj("/api/rewards/video/fail", JSONObject().put("sessionId", activeSession)) } catch (_: Exception) {}
+                            rewardMessage = "এখন বিজ্ঞাপন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+                            refreshWallet()
+                            rewardedLoading = false
+                        }
+                    }
+                })
+            } catch (e: Exception) {
+                if (sessionId.isNotBlank()) try { Api.postObj("/api/rewards/video/fail", JSONObject().put("sessionId", sessionId)) } catch (_: Exception) {}
+                rewardMessage = e.message ?: "বিজ্ঞাপন চালু করা যায়নি। সার্ভার সংযোগ পরীক্ষা করুন।"
+                refreshWallet()
+                rewardedLoading = false
+            }
+        }
+    }
 
     fun refreshBoard() {
         scope.launch {
@@ -99,6 +194,26 @@ fun GamesScreen() {
                 Text("সেরা স্কোর: $best", color = Muted, modifier = Modifier.padding(top = 8.dp))
             }
         }
+        Card(Modifier.fillMaxWidth().padding(top = 12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF0EDFF)), shape = RoundedCornerShape(22.dp)) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Redeem, null, tint = Color(0xFF6957D5), modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Adda Rewards", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = Ink)
+                        Text("ব্যালেন্স: $coinBalance কয়েন • আজ বাকি: $videosRemaining/10 ভিডিও", fontSize = 12.sp, color = Muted)
+                    }
+                }
+                Button(onClick = { watchRewardedVideo() }, enabled = !rewardedLoading && videosRemaining > 0, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Text(if (rewardedLoading) "বিজ্ঞাপন প্রস্তুত হচ্ছে…" else if (videosRemaining <= 0) "আজকের ভিডিও সীমা শেষ" else "▶ ভিডিও দেখুন • +১০ কয়েন", fontWeight = FontWeight.Bold)
+                }
+                Text(rewardMessage, fontSize = 12.sp, color = Muted)
+                OutlinedButton(onClick = { showRedeem = true; redeemStatus = "" }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Filled.Redeem, null); Spacer(Modifier.width(6.dp)); Text("কয়েন দিয়ে ফ্লেক্সিলোড রিডিম")
+                }
+            }
+        }
+
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { refreshBoard() }, modifier = Modifier.weight(1f)) { Icon(Icons.Filled.EmojiEvents, null); Spacer(Modifier.width(5.dp)); Text("দৈনিক হাইস্কোর") }
             Button(onClick = { showClaim = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Filled.Redeem, null); Spacer(Modifier.width(5.dp)); Text("Claim Reward") }
@@ -137,4 +252,54 @@ fun GamesScreen() {
             } catch (e: Exception) { claimStatus = e.message ?: "আবেদন জমা দেওয়া যায়নি" }
         }
     }) { Text("আবেদন জমা দিন") } }, dismissButton = { TextButton(onClick = { showClaim = false }) { Text("বন্ধ করুন") } })
+
+    if (showRedeem) AlertDialog(
+        onDismissRequest = { if (!redeemBusy) showRedeem = false },
+        title = { Text("কয়েন দিয়ে ফ্লেক্সিলোড") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("বর্তমান ব্যালেন্স: $coinBalance কয়েন", fontWeight = FontWeight.Bold)
+                Text("রিডিম রেট: প্রতি ৳১০ = ১,০০০ কয়েন (সার্ভার কনফিগে পরিবর্তনযোগ্য)", fontSize = 12.sp)
+                Text("মোবাইল অপারেটর")
+                listOf("grameenphone" to "Grameenphone", "robi" to "Robi", "banglalink" to "Banglalink", "teletalk" to "Teletalk").forEach { (id, label) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = redeemOperator == id, onClick = { redeemOperator = id })
+                        Text(label)
+                    }
+                }
+                Text("রিচার্জের পরিমাণ")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(10, 20, 50, 100).forEach { amount ->
+                        FilterChip(selected = redeemAmount == amount, onClick = { redeemAmount = amount }, label = { Text("৳$amount") })
+                    }
+                }
+                OutlinedTextField(value = redeemPhone, onValueChange = { redeemPhone = it.filter(Char::isDigit).take(11) }, label = { Text("মোবাইল নম্বর") }, singleLine = true)
+                Text("অনুরোধটি অ্যাডমিন যাচাই করে ম্যানুয়ালি রিচার্জ করবেন। বাতিল হলে কয়েন ফেরত দেওয়া হবে।", fontSize = 11.sp, color = Muted)
+                if (redeemStatus.isNotBlank()) Text(redeemStatus, color = Muted, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !redeemBusy, onClick = {
+                scope.launch {
+                    redeemBusy = true
+                    try {
+                        val result = Api.postObj("/api/rewards/redeem", JSONObject().put("operator", redeemOperator).put("amount", redeemAmount).put("phone", redeemPhone).put("requestKey", redeemRequestKey))
+                        redeemStatus = result.optString("message", "রিডিম আবেদন জমা হয়েছে।")
+                        redeemRequestKey = UUID.randomUUID().toString()
+                        refreshWallet()
+                    } catch (e: Exception) { redeemStatus = e.message ?: "রিডিম আবেদন করা যায়নি" }
+                    finally { redeemBusy = false }
+                }
+            }) { Text(if (redeemBusy) "জমা হচ্ছে…" else "রিডিম আবেদন করুন") }
+        },
+        dismissButton = { TextButton(onClick = { if (!redeemBusy) showRedeem = false }) { Text("বন্ধ করুন") } }
+    )
+
+}
+
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

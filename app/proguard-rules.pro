@@ -22,3 +22,10 @@
 
 # রানটাইম স্ট্যাক ট্রেস পড়ার জন্য
 -keepattributes SourceFile,LineNumberTable
+
+# Start.io SDK
+-keep class com.startapp.** { *; }
+-keep class com.truenet.** { *; }
+-dontwarn com.startapp.**
+-dontwarn com.truenet.**
+-dontwarn org.jetbrains.annotations.**
