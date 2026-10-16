@@ -117,7 +117,7 @@ fun GamesScreen() {
                     override fun onFailedToReceiveAd(adInfo: Ad?) {
                         scope.launch {
                             try { Api.postObj("/api/rewards/video/fail", JSONObject().put("sessionId", activeSession)) } catch (_: Exception) {}
-                            rewardMessage = "এখন বিজ্ঞাপন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+                            rewardMessage = "এখন বিজ্ঞাপন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।" + (adInfo?.errorMessage?.takeIf { it.isNotBlank() }?.let { "\n(কারণ: $it)" } ?: "")
                             refreshWallet()
                             rewardedLoading = false
                         }
