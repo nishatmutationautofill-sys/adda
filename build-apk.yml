@@ -1,0 +1,43 @@
+name: Build Android APK (Kotlin)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: কোড ডাউনলোড
+        uses: actions/checkout@v4
+
+      - name: Java 17 সেটআপ
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK প্রস্তুত
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null || true
+
+      - name: Gradle সেটআপ
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Release APK বিল্ড (ছোট সাইজ)
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
+        run: gradle :app:assembleRelease --stacktrace --no-daemon
+
+      - name: APK আপলোড
+        uses: actions/upload-artifact@v4
+        with:
+          name: adda-native-apk
+          # একটাই universal APK (arm64-v8a + armeabi-v7a)
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
