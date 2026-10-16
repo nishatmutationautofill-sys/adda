@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.adda.chat"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.adda.chatkt"
@@ -104,9 +104,6 @@ dependencies {
     }
     implementation("io.getstream:stream-webrtc-android:1.1.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
-    // Start.io ads SDK (banner and other ad formats)
-    // noinspection GradleDynamicVersion
-    implementation("com.startapp:inapp-sdk:5.4.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // Media3: Transformer = হার্ডওয়্যার H.264 ভিডিও কমপ্রেস, ExoPlayer/UI = অ্যাপের ভেতরে ভিডিও ও ভয়েস প্লেয়ার
     implementation("androidx.media3:media3-transformer:1.4.1")

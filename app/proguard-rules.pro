@@ -23,12 +23,6 @@
 # রানটাইম স্ট্যাক ট্রেস পড়ার জন্য
 -keepattributes SourceFile,LineNumberTable
 
-# Start.io SDK
--keep class com.startapp.** { *; }
--keep class com.truenet.** { *; }
--dontwarn com.startapp.**
--dontwarn com.truenet.**
--dontwarn org.jetbrains.annotations.**
 
 # রিলিজ বিল্ডে R8 যেন "Missing class" সতর্কতায় ব্যর্থ না হয়
 -ignorewarnings

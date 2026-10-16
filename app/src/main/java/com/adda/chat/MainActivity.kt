@@ -49,6 +49,18 @@ class MainActivity : ComponentActivity() {
 
     /** নোটিফিকেশনের "রিসিভ" বাটন চাপলে সরাসরি কল গ্রহণ */
     private fun handleCallIntent(intent: Intent?) {
+        // কলের নোটিফিকেশন (ফুল-স্ক্রিন বা রিসিভ বাটন) থেকে এলে লক স্ক্রিনের ওপরে দেখান ও স্ক্রিন জাগান
+        if (intent?.action == Notifier.ACTION_ACCEPT || intent?.action == Notifier.ACTION_SHOW_CALL) {
+            if (android.os.Build.VERSION.SDK_INT >= 27) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                window.addFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                )
+            }
+        }
         if (intent?.action != Notifier.ACTION_ACCEPT) return
         intent.action = null
         if (CallManager.phase != CallManager.Phase.Incoming) return

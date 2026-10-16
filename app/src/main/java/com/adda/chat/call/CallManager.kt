@@ -2,6 +2,7 @@ package com.adda.chat.call
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -14,6 +15,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.adda.chat.data.Api
 import com.adda.chat.data.Session
 import com.adda.chat.service.ConnectionService
 import com.adda.chat.util.Notifier
@@ -21,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.webrtc.Camera2Enumerator
 import org.webrtc.CameraVideoCapturer
@@ -98,6 +101,14 @@ object CallManager {
     private const val OUTGOING_TIMEOUT_MS = 45_000L
     private const val INCOMING_TIMEOUT_MS = 50_000L
     private var prevAudioMode = AudioManager.MODE_NORMAL
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    // ICE সার্ভার (STUN + TURN) সার্ভার থেকে আনা হয়; না পেলে ডিফল্ট তালিকা
+    private var cachedIceServers: List<PeerConnection.IceServer>? = null
+    private var iceFetchedAt = 0L
+    // অফার/অ্যানসার পাঠানোর আগে তৈরি হওয়া ICE candidate জমা রাখা হয় (নইলে অপর পক্ষ হারিয়ে ফেলে)
+    private var signalReady = false
+    private val outCandidates = mutableListOf<JSONObject>()
 
     fun init(context: Context) {
         ctx = context.applicationContext
@@ -124,18 +135,54 @@ object CallManager {
         return f
     }
 
-    private fun createPeerAndMedia(kind: String): PeerConnection {
+    private fun defaultIceServers(): List<PeerConnection.IceServer> = listOf(
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer()
+    )
+
+    /** সার্ভার থেকে STUN/TURN তালিকা আনে (মোবাইল ডেটায় কল সংযোগের জন্য TURN জরুরি) */
+    private suspend fun loadIceServers(): List<PeerConnection.IceServer> {
+        val cached = cachedIceServers
+        if (cached != null && SystemClock.elapsedRealtime() - iceFetchedAt < 10 * 60_000L) return cached
+        return try {
+            val obj = withTimeout(4_000) { Api.getObj("/api/webrtc/ice") }
+            val arr = obj.optJSONArray("iceServers")
+            val list = mutableListOf<PeerConnection.IceServer>()
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val urls = mutableListOf<String>()
+                    val u = o.opt("urls")
+                    if (u is org.json.JSONArray) { for (k in 0 until u.length()) urls.add(u.optString(k)) }
+                    else if (u != null) urls.add(u.toString())
+                    val clean = urls.filter { it.isNotBlank() }
+                    if (clean.isEmpty()) continue
+                    val b = PeerConnection.IceServer.builder(clean)
+                    val user = o.optString("username")
+                    val cred = o.optString("credential")
+                    if (user.isNotEmpty()) b.setUsername(user)
+                    if (cred.isNotEmpty()) b.setPassword(cred)
+                    list.add(b.createIceServer())
+                }
+            }
+            val result = if (list.isEmpty()) defaultIceServers() else list
+            cachedIceServers = result
+            iceFetchedAt = SystemClock.elapsedRealtime()
+            result
+        } catch (_: Exception) {
+            cached ?: defaultIceServers()
+        }
+    }
+
+    private fun createPeerAndMedia(kind: String, servers: List<PeerConnection.IceServer>): PeerConnection {
         val f = ensureFactory()
-        val cfg = PeerConnection.RTCConfiguration(
-            listOf(
-                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer()
-            )
-        ).apply {
+        val cfg = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
         }
         val p = f.createPeerConnection(cfg, observer) ?: throw IllegalStateException("পিয়ার কানেকশন তৈরি হয়নি")
         pc = p
@@ -243,19 +290,15 @@ object CallManager {
 
         override fun onIceCandidate(candidate: IceCandidate?) {
             if (candidate == null) return
-            val to = peerUid
+            val payload = JSONObject()
+                .put("candidate", candidate.sdp)
+                .put("sdpMid", candidate.sdpMid)
+                .put("sdpMLineIndex", candidate.sdpMLineIndex)
             Session.scope.launch {
-                if (to.isEmpty()) return@launch
-                Session.emit(
-                    "webrtc:candidate",
-                    JSONObject().put("to", to).put(
-                        "candidate",
-                        JSONObject()
-                            .put("candidate", candidate.sdp)
-                            .put("sdpMid", candidate.sdpMid)
-                            .put("sdpMLineIndex", candidate.sdpMLineIndex)
-                    )
-                )
+                if (peerUid.isEmpty()) return@launch
+                // অফার/অ্যানসার পাঠানোর আগে হলে জমা রাখি; পরে একসাথে পাঠানো হবে
+                if (!signalReady) outCandidates.add(payload)
+                else Session.emit("webrtc:candidate", JSONObject().put("to", peerUid).put("candidate", payload))
             }
         }
 
@@ -270,6 +313,16 @@ object CallManager {
             val track = transceiver?.receiver?.track()
             if (track is VideoTrack) Session.scope.launch { remoteVideo = track }
         }
+    }
+
+    private fun flushOutCandidates() {
+        signalReady = true
+        val to = peerUid
+        if (to.isEmpty()) { outCandidates.clear(); return }
+        for (c in outCandidates.toList()) {
+            Session.emit("webrtc:candidate", JSONObject().put("to", to).put("candidate", c))
+        }
+        outCandidates.clear()
     }
 
     private fun markConnected() {
@@ -303,8 +356,12 @@ object CallManager {
                 startAudioMode()
                 startRingback()
                 startOutgoingTimeout()
+                signalReady = false
+                outCandidates.clear()
                 ConnectionService.setCallState(ctx, true, callKind == "video")
-                val p = createPeerAndMedia(callKind)
+                val servers = loadIceServers()
+                if (phase == Phase.None) return@launch
+                val p = createPeerAndMedia(callKind, servers)
                 val offer = p.createOfferSuspend()
                 p.setLocalSuspend(offer)
                 tuneSenders()
@@ -312,6 +369,7 @@ object CallManager {
                     "webrtc:offer",
                     JSONObject().put("to", peer).put("offer", sdpJson(offer)).put("kind", callKind)
                 )
+                flushOutCandidates()
             } catch (e: Exception) {
                 Session.toast("কল শুরু করা যায়নি: ${e.message}")
                 endCall(false)
@@ -323,6 +381,11 @@ object CallManager {
 
     private fun handleOffer(from: String, data: JSONObject) {
         if (Session.me?.friends?.contains(from) != true) return
+        // একই কলারের অফার আবার এলে (সার্ভার সকেট রিকানেক্টে অফার রিপ্লে করে) ব্যস্ত বলবেন না — উপেক্ষা করুন
+        if (phase != Phase.None && from == peerUid) {
+            if (phase == Phase.Incoming && data.optJSONObject("offer") != null) pendingOffer = data
+            return
+        }
         if (phase != Phase.None) {
             Session.emit("webrtc:hangup", JSONObject().put("to", from).put("reason", "busy"))
             return
@@ -343,6 +406,7 @@ object CallManager {
     }
 
     fun acceptCall() {
+        if (phase != Phase.Incoming) return
         val offerData = pendingOffer ?: return
         stopRingtone()
         cancelTimeout()
@@ -354,7 +418,11 @@ object CallManager {
                 status = "${Session.displayName(peerUid)}-এর কল গ্রহণ করা হচ্ছে"
                 Session.openConversation(peerUid)
                 startAudioMode()
-                val p = createPeerAndMedia(callKind)
+                signalReady = false
+                outCandidates.clear()
+                val servers = loadIceServers()
+                if (phase == Phase.None) return@launch
+                val p = createPeerAndMedia(callKind, servers)
                 val offer = offerData.getJSONObject("offer")
                 p.setRemoteSuspend(SessionDescription(SessionDescription.Type.OFFER, offer.getString("sdp")))
                 flushCandidates()
@@ -365,6 +433,7 @@ object CallManager {
                     "webrtc:answer",
                     JSONObject().put("to", peerUid).put("answer", sdpJson(answer))
                 )
+                flushOutCandidates()
                 pendingOffer = null
                 status = "কল সংযুক্ত হচ্ছে…"
             } catch (e: Exception) {
@@ -558,6 +627,8 @@ object CallManager {
         audioSource = null
         pendingOffer = null
         pendingCandidates.clear()
+        outCandidates.clear()
+        signalReady = false
 
         remoteVideo = null
         localVideo = null
@@ -585,6 +656,7 @@ object CallManager {
     private fun startAudioMode() {
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         prevAudioMode = am.mode
+        requestAudioFocus(am)
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         speakerOn = callKind == "video"
         am.isSpeakerphoneOn = speakerOn
@@ -595,6 +667,42 @@ object CallManager {
         am.isSpeakerphoneOn = false
         am.mode = prevAudioMode
         speakerOn = false
+        abandonAudioFocus(am)
+    }
+
+    private fun requestAudioFocus(am: AudioManager) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                am.requestAudioFocus(req)
+                audioFocusRequest = req
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun abandonAudioFocus(am: AudioManager) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+                audioFocusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     // ---- ইনকামিং রিংটোন (লুপ) + ভাইব্রেশন ----
