@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.SportsEsports
@@ -50,6 +51,7 @@ fun MainShell() {
             when (tab) {
                 2 -> GamesScreen()
                 3 -> DownloadAppScreen()
+                4 -> CallsScreen()
                 else -> HomeScreen(tab = tab, onGoPeople = { tab = 1 })
             }
         }
@@ -65,6 +67,7 @@ fun MainShell() {
                     NavPill(Icons.Filled.PersonAdd, "আগ্রহী", tab == 1, requestCount, Modifier.weight(1f)) { tab = 1 }
                     NavPill(Icons.Filled.SportsEsports, "গেম", tab == 2, 0, Modifier.weight(1f)) { tab = 2 }
                     NavPill(Icons.Filled.Download, "ডাউনলোড", tab == 3, 0, Modifier.weight(1f)) { tab = 3 }
+                    NavPill(Icons.Filled.Call, "কল", tab == 4, 0, Modifier.weight(1f)) { tab = 4 }
                 }
             }
         }

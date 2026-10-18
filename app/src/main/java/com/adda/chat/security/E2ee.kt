@@ -146,4 +146,103 @@ object E2ee {
         val meta = JSONObject(metaBytes.toString(Charsets.UTF_8))
         return DecryptedFile(file, meta.optString("fileName", "adda_file"), meta.optString("mimeType", "application/octet-stream"))
     }
+
+    // ---------- বড় ফাইলের জন্য চাঙ্ক-ভিত্তিক এনক্রিপশন (_e2ee = 2) ----------
+    // ফাইল ১ MiB করে টুকরো হয়ে এনক্রিপ্ট হয়, তাই মেমরি ব্যবহার ফাইলের সাইজের ওপর নির্ভর করে না।
+    // প্রতি টুকরো: [৪ বাইট দৈর্ঘ্য][১২ বাইট IV][সাইফারটেক্সট+ট্যাগ]
+    // AAD = টুকরোর ক্রম (৮ বাইট) + শেষ-টুকরো পতাকা, তাই টুকরো সরানো/কাটা/পুনর্বিন্যাস করলে ডিক্রিপ্ট ব্যর্থ হয়।
+    private const val STREAM_CHUNK = 1024 * 1024
+
+    private fun chunkAad(index: Long, last: Boolean): ByteArray =
+        java.nio.ByteBuffer.allocate(9).putLong(index).put(if (last) 1 else 0).array()
+
+    private fun readFully(input: java.io.InputStream, buf: ByteArray): Int {
+        var off = 0
+        while (off < buf.size) {
+            val n = input.read(buf, off, buf.size - off)
+            if (n < 0) break
+            off += n
+        }
+        return off
+    }
+
+    /** input ফাইল এনক্রিপ্ট করে output ফাইলে লেখে; envelope (JSON) রিটার্ন করে */
+    fun encryptFileStreaming(
+        input: java.io.File, output: java.io.File,
+        senderUid: String, recipientUid: String, recipientPublicKey: String,
+        fileName: String, mimeType: String
+    ): String {
+        val pair = keyPair()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val rnd = java.security.SecureRandom()
+        input.inputStream().buffered(STREAM_CHUNK).use { ins ->
+            output.outputStream().buffered(STREAM_CHUNK).use { outs ->
+                var cur = ByteArray(STREAM_CHUNK)
+                var curLen = readFully(ins, cur)
+                var index = 0L
+                while (true) {
+                    var next = ByteArray(STREAM_CHUNK)
+                    val nextLen = if (curLen == STREAM_CHUNK) readFully(ins, next) else 0
+                    val last = nextLen == 0
+                    val iv = ByteArray(12).also { rnd.nextBytes(it) }
+                    val c = Cipher.getInstance("AES/GCM/NoPadding")
+                    c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+                    c.updateAAD(chunkAad(index, last))
+                    val ct = c.doFinal(cur, 0, curLen)
+                    outs.write(java.nio.ByteBuffer.allocate(4).putInt(ct.size).array())
+                    outs.write(iv)
+                    outs.write(ct)
+                    if (last) break
+                    cur = next; curLen = nextLen; index++
+                }
+            }
+        }
+        val metadata = JSONObject().put("fileName", fileName).put("mimeType", mimeType)
+        val (metaCipher, metaIv) = aesEncrypt(key, metadata.toString().toByteArray(Charsets.UTF_8))
+        return JSONObject()
+            .put("_e2ee", 2)
+            .put("metaIv", Base64.encodeToString(metaIv, Base64.NO_WRAP))
+            .put("metaCipher", Base64.encodeToString(metaCipher, Base64.NO_WRAP))
+            .put("keys", wrappedKeys(senderUid, Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP), recipientUid, recipientPublicKey, key))
+            .toString()
+    }
+
+    data class DecryptedStream(val fileName: String, val mimeType: String)
+
+    /** cipherFile ডিক্রিপ্ট করে output ফাইলে লেখে */
+    fun decryptFileStreaming(cipherFile: java.io.File, output: java.io.File, envelopeText: String, myUid: String): DecryptedStream {
+        val envelope = JSONObject(envelopeText)
+        require(envelope.optInt("_e2ee") == 2) { "এনক্রিপ্টেড ফাইলের তথ্য পাওয়া যায়নি" }
+        val wrapped = envelope.getJSONObject("keys").optString(myUid)
+        require(wrapped.isNotBlank()) { "এই ডিভাইসের জন্য এনক্রিপশন কী নেই" }
+        val key = unwrapKey(wrapped)
+        val metaBytes = aesDecrypt(key, Base64.decode(envelope.getString("metaCipher"), Base64.DEFAULT), Base64.decode(envelope.getString("metaIv"), Base64.DEFAULT))
+        val meta = JSONObject(metaBytes.toString(Charsets.UTF_8))
+        val total = cipherFile.length()
+        var consumed = 0L
+        cipherFile.inputStream().buffered(STREAM_CHUNK).use { ins ->
+            output.outputStream().buffered(STREAM_CHUNK).use { outs ->
+                var index = 0L
+                val header = ByteArray(16)
+                while (true) {
+                    val h = readFully(ins, header)
+                    require(h == 16) { "ফাইল অসম্পূর্ণ বা নষ্ট" }
+                    val len = java.nio.ByteBuffer.wrap(header, 0, 4).int
+                    require(len in 16..(STREAM_CHUNK + 64)) { "ফাইল নষ্ট" }
+                    val iv = header.copyOfRange(4, 16)
+                    val ct = ByteArray(len)
+                    require(readFully(ins, ct) == len) { "ফাইল অসম্পূর্ণ বা নষ্ট" }
+                    consumed += 16 + len
+                    val last = consumed >= total
+                    val c = Cipher.getInstance("AES/GCM/NoPadding")
+                    c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                    c.updateAAD(chunkAad(index, last))
+                    outs.write(c.doFinal(ct))
+                    if (last) break
+                    index++
+                }
+            }
+        }
+        return DecryptedStream(meta.optString("fileName", "adda_file"), meta.optString("mimeType", "application/octet-stream"))
+    }
 }

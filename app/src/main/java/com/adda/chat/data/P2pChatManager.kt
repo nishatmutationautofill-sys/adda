@@ -14,8 +14,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * WebRTC DataChannel transport for online chat peers. Server is used only for signaling.
- * Offline delivery/history remains on the existing server path.
+ * WebRTC DataChannel transport for online chat peers (শুধু টেক্সট)। ফাইল/ছবি/ভিডিও এখন সার্ভারের মাধ্যমে যায়।
  */
 object P2pChatManager {
     private data class Peer(val pc: PeerConnection, var channel: DataChannel? = null, val pending: MutableList<IceCandidate> = mutableListOf())
@@ -23,7 +22,6 @@ object P2pChatManager {
     private var factory: PeerConnectionFactory? = null
     private val peers = ConcurrentHashMap<String, Peer>()
     var onText: ((String, String, String, Long) -> Unit)? = null
-    var onFile: ((String, String, String, String, Long, Long) -> Unit)? = null
 
     fun init(ctx: Context) {
         context = ctx.applicationContext
@@ -102,40 +100,6 @@ object P2pChatManager {
         return try { dc.send(DataChannel.Buffer(ByteBuffer.wrap(msg.toString().toByteArray(Charsets.UTF_8)), false)) } catch (_: Exception) { false }
     }
 
-    /**
-     * P2P file framing: one JSON header, binary payload frames, one JSON end frame.
-     * ফাইল ডিস্ক থেকে ছোট ছোট টুকরোয় পড়া হয় — মেমরিতে পুরো ফাইল রাখা হয় না, তাই সাইজের কোনো সীমা নেই।
-     */
-    suspend fun sendFile(uidRaw: String, name: String, mime: String, file: java.io.File, onProgress: (Float) -> Unit = {}): Boolean {
-        val uid = uidRaw.uppercase(); val dc = peers[uid]?.channel ?: return false
-        if (dc.state() != DataChannel.State.OPEN) return false
-        val total = file.length()
-        return try {
-            val id = UUID.randomUUID().toString()
-            val header = JSONObject().put("kind", "file-start").put("id", id).put("name", name).put("mime", mime).put("size", total).put("date", System.currentTimeMillis())
-            if (!dc.send(DataChannel.Buffer(ByteBuffer.wrap(header.toString().toByteArray(Charsets.UTF_8)), false))) return false
-            val chunkSize = 12 * 1024
-            val buf = ByteArray(chunkSize)
-            var sent = 0L
-            var lastReport = 0L
-            java.io.FileInputStream(file).use { input ->
-                while (true) {
-                    val n = input.read(buf)
-                    if (n <= 0) break
-                    if (dc.state() != DataChannel.State.OPEN) return false
-                    while (dc.bufferedAmount() > 512 * 1024) kotlinx.coroutines.delay(10)
-                    val chunk = ByteBuffer.allocate(8 + n).putInt(0x41444441).putInt(sent.toInt()).put(buf, 0, n)
-                    chunk.flip()
-                    if (!dc.send(DataChannel.Buffer(chunk, true))) return false
-                    sent += n
-                    if (total > 0 && sent - lastReport >= 256 * 1024) { lastReport = sent; onProgress((sent.toFloat() / total).coerceIn(0f, 1f)) }
-                }
-            }
-            val end = JSONObject().put("kind", "file-end").put("id", id)
-            dc.send(DataChannel.Buffer(ByteBuffer.wrap(end.toString().toByteArray(Charsets.UTF_8)), false))
-        } catch (_: Exception) { false }
-    }
-
     private fun createPeer(uid: String): Peer? {
         val f = factory ?: return null
         val config = PeerConnection.RTCConfiguration(listOf(
@@ -162,61 +126,15 @@ object P2pChatManager {
 
     private fun observeChannel(uid: String, dc: DataChannel) {
         dc.registerObserver(object : DataChannel.Observer {
-            private var incomingId = ""; private var incomingName = ""; private var incomingSize = -1L; private var incomingDate = 0L
-            private var incomingFile: java.io.File? = null
-            private var incomingOut: java.io.OutputStream? = null
-            private var received = 0L
-
-            private fun abortIncoming() {
-                try { incomingOut?.close() } catch (_: Exception) {}
-                incomingOut = null
-                incomingFile?.delete(); incomingFile = null
-                incomingSize = -1L; received = 0L
-            }
-
             override fun onBufferedAmountChange(previousAmount: Long) {}
-            override fun onStateChange() { if (dc.state() == DataChannel.State.CLOSED) abortIncoming() }
+            override fun onStateChange() {}
             override fun onMessage(buffer: DataChannel.Buffer) {
                 try {
+                    if (buffer.binary) return // ফাইল এখন সার্ভারের মাধ্যমে যায়; P2P-তে শুধু টেক্সট
                     val bytes = ByteArray(buffer.data.remaining()); buffer.data.get(bytes)
-                    if (!buffer.binary) {
-                        val o = JSONObject(String(bytes, Charsets.UTF_8))
-                        when (o.optString("kind")) {
-                            "text" -> onText?.invoke(uid, o.optString("id"), o.optString("text"), o.optLong("date", System.currentTimeMillis()))
-                            "file-start" -> {
-                                abortIncoming()
-                                val size = o.optLong("size", -1L)
-                                if (size >= 0L) {
-                                    incomingId = o.optString("id"); incomingName = o.optString("name", "file")
-                                    incomingSize = size; incomingDate = o.optLong("date"); received = 0L
-                                    val f = java.io.File(context?.cacheDir, "p2p_${incomingId}_${incomingName.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
-                                    incomingFile = f
-                                    incomingOut = java.io.BufferedOutputStream(java.io.FileOutputStream(f), 64 * 1024)
-                                }
-                            }
-                            "file-end" -> {
-                                val f = incomingFile
-                                try { incomingOut?.close() } catch (_: Exception) {}
-                                incomingOut = null
-                                if (f != null && received == incomingSize) {
-                                    onFile?.invoke(uid, incomingId, f.absolutePath, incomingName, incomingSize, incomingDate)
-                                    incomingFile = null; incomingSize = -1L; received = 0L
-                                } else abortIncoming()
-                            }
-                        }
-                    } else {
-                        val out = incomingOut
-                        val bb = ByteBuffer.wrap(bytes)
-                        if (out != null && bb.remaining() >= 8 && bb.int == 0x41444441) {
-                            bb.int
-                            val n = bb.remaining()
-                            if (incomingSize >= 0 && received + n <= incomingSize) {
-                                out.write(bytes, bytes.size - n, n)
-                                received += n
-                            }
-                        }
-                    }
-                } catch (_: Exception) { abortIncoming() }
+                    val o = JSONObject(String(bytes, Charsets.UTF_8))
+                    if (o.optString("kind") == "text") onText?.invoke(uid, o.optString("id"), o.optString("text"), o.optLong("date", System.currentTimeMillis()))
+                } catch (_: Exception) {}
             }
         })
     }

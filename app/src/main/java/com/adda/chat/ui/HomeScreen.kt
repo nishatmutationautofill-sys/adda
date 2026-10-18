@@ -83,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adda.chat.data.Session
+import com.adda.chat.data.Social
 
 @Composable
 fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
@@ -221,6 +222,8 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             when (tab) {
                 0 -> {
             // ---- চ্যাট ট্যাব: সাম্প্রতিক চ্যাট লিস্ট ----
+            // ---- ২৪ ঘণ্টার স্টোরি ----
+            item { StoriesRow() }
             // ---- স্টোরি-স্টাইল: এখন অনলাইনে থাকা বন্ধুরা ----
             val onlineFriends = me.friends.filter { Session.online[it] == true }
             if (onlineFriends.isNotEmpty()) {
@@ -255,7 +258,9 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
             val sortedFriends = filteredFriends.sortedWith(
                 compareByDescending<String> { Session.lastPreview[it]?.date ?: 0L }.thenBy { Session.displayName(it).lowercase() }
             )
-            if (me.friends.isEmpty()) {
+            item { NewGroupButton() }
+            items(Social.groups.toList(), key = { "grp_${it.id}" }) { g -> GroupListRow(g) }
+            if (me.friends.isEmpty() && Social.groups.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.size(84.dp).clip(CircleShape).background(Them), contentAlignment = Alignment.Center) { androidx.compose.material3.Icon(Icons.Filled.People, contentDescription = null, tint = Accent, modifier = Modifier.size(38.dp)) }
@@ -263,7 +268,7 @@ fun HomeScreen(tab: Int = 0, onGoPeople: () -> Unit = {}) {
                         Text("এখনো কোনো চ্যাট নেই", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
                     }
                 }
-            } else if (sortedFriends.isEmpty()) {
+            } else if (sortedFriends.isEmpty() && me.friends.isNotEmpty()) {
                 item { Text("এই নামে বা আইডিতে কোনো বন্ধু পাওয়া যায়নি", color = Muted) }
             }
             items(sortedFriends, key = { "chat_$it" }) { uid ->

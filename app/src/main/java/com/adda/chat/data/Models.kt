@@ -46,7 +46,13 @@ data class ChatMessage(
     val replyFrom: String = "",
     val replyKind: String = "",
     /** ০ পাঠানো, ১ পৌঁছেছে, ২ দেখেছে */
-    val status: Int = 0
+    val status: Int = 0,
+    /** রিঅ্যাকশন: ইউজার আইডি → ইমোজি */
+    val reactions: Map<String, String> = emptyMap(),
+    /** এডিট করা হলে এডিটের সময় (না হলে ০) */
+    val editedAt: Long = 0L,
+    val pinned: Boolean = false,
+    val forwarded: Boolean = false
 ) {
     val isFile: Boolean get() = type == "file" && !fileUrl.isNullOrEmpty()
     val isImage: Boolean
@@ -118,8 +124,24 @@ fun parseMessage(o: JSONObject): ChatMessage = ChatMessage(
         o.has("seenAt") && !o.isNull("seenAt") -> 2
         o.has("deliveredAt") && !o.isNull("deliveredAt") -> 1
         else -> 0
-    }
+    },
+    reactions = parseReactions(o.optJSONObject("reactions")),
+    editedAt = if (o.isNull("editedAt") || !o.has("editedAt")) 0L else parseDate(o.opt("editedAt")),
+    pinned = o.optBoolean("pinned", false),
+    forwarded = o.optBoolean("forwarded", false)
 )
+
+/** সার্ভারের গ্রুপ আইডি G-XXXXXXXX আকারের */
+private val GROUP_ID_REGEX = Regex("^G-[0-9A-F]{8}$")
+fun isGroupId(id: String?): Boolean = id != null && GROUP_ID_REGEX.matches(id)
+
+fun parseReactions(o: JSONObject?): Map<String, String> {
+    if (o == null) return emptyMap()
+    val out = LinkedHashMap<String, String>()
+    val it = o.keys()
+    while (it.hasNext()) { val k = it.next(); val v = o.optString(k); if (v.isNotBlank()) out[k] = v }
+    return out
+}
 
 private fun parseDate(v: Any?): Long {
     return when (v) {

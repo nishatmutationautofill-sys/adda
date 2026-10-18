@@ -131,6 +131,8 @@ import com.adda.chat.call.CallManager
 import com.adda.chat.data.Api
 import com.adda.chat.data.ChatMessage
 import com.adda.chat.data.Session
+import com.adda.chat.data.Social
+import com.adda.chat.data.isGroupId
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -139,7 +141,7 @@ import java.util.Locale
 fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit) {
     val uid = Session.activeFriend ?: return
     val ctx = LocalContext.current
-    var input by remember { mutableStateOf("") }
+    var input by remember(uid) { mutableStateOf(Session.drafts[uid].orEmpty()) }
     var secureMode by remember { mutableStateOf(false) }
     var ttlSeconds by remember { mutableStateOf(3) }
     var viewerUrl by remember { mutableStateOf<String?>(null) }
@@ -152,11 +154,27 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
     var attachMenu by remember { mutableStateOf(false) }
     var confirmAction by remember { mutableStateOf<String?>(null) }
     var showEmojiPack by remember { mutableStateOf(false) }
+    val isGroup = isGroupId(uid)
+    var searchOn by remember(uid) { mutableStateOf(false) }
+    var searchQuery by remember(uid) { mutableStateOf("") }
+    var editTarget by remember(uid) { mutableStateOf<ChatMessage?>(null) }
+    var forwardTarget by remember(uid) { mutableStateOf<ChatMessage?>(null) }
+    var showGallery by remember(uid) { mutableStateOf(false) }
+    var showDisappear by remember(uid) { mutableStateOf(false) }
+    var showGroupInfo by remember(uid) { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile by remember { mutableStateOf<File?>(null) }
     var customEmojis by remember { mutableStateOf(loadEmojiPack(ctx)) }
     val listState = rememberLazyListState()
+    val shownMessages = if (searchQuery.isBlank()) Session.messages.toList() else Session.messages.filter {
+        it.text.contains(searchQuery, ignoreCase = true) || (it.fileName ?: "").contains(searchQuery, ignoreCase = true)
+    }
+    // অসমাপ্ত লেখা সংরক্ষণ + "টাইপ করছে" সিগন্যাল
+    LaunchedEffect(input, uid) {
+        Session.drafts[uid] = input
+        if (input.isNotBlank()) Session.notifyTyping(uid)
+    }
     val uiScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val composerColor by animateColorAsState(if (secureMode) Ink else Color.White, label = "composerColor")
@@ -211,7 +229,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 }
                 Avatar(
                     Session.displayName(uid), 42.dp, online = Session.online[uid] == true, photoUrl = Session.profilePhotos[uid],
-                    modifier = Modifier.clip(CircleShape).clickable { showProfile = true }
+                    modifier = Modifier.clip(CircleShape).clickable { if (isGroup) showGroupInfo = true else showProfile = true }
                 )
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -222,26 +240,61 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                             BadgeIcon(level, 16.dp)
                         }
                     }
+                    val typer = Session.typing[uid]
                     Text(
-                        if (Session.online[uid] == true) "অনলাইন" else "অফলাইন",
+                        when {
+                            typer != null -> if (isGroup) "$typer টাইপ করছে…" else "টাইপ করছে…"
+                            isGroup -> "${Social.groupById(uid)?.members?.size ?: 0} জন সদস্য"
+                            Session.online[uid] == true -> "অনলাইন"
+                            else -> "অফলাইন"
+                        },
                         fontSize = 12.sp,
-                        color = if (Session.online[uid] == true) Color(0xFF168653) else Muted
+                        color = if (typer != null || (!isGroup && Session.online[uid] == true)) Color(0xFF168653) else Muted
                     )
                 }
-                IconButton(onClick = { requestCallPermission("audio") { CallManager.startCall("audio", uid) } }) {
-                    Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Navy)
-                }
-                IconButton(onClick = { requestCallPermission("video") { CallManager.startCall("video", uid) } }) {
-                    Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Navy)
+                if (!isGroup) {
+                    IconButton(onClick = { requestCallPermission("audio") { CallManager.startCall("audio", uid) } }) {
+                        Icon(Icons.Filled.Call, contentDescription = "অডিও কল", tint = Navy)
+                    }
+                    IconButton(onClick = { requestCallPermission("video") { CallManager.startCall("video", uid) } }) {
+                        Icon(Icons.Filled.Videocam, contentDescription = "ভিডিও কল", tint = Navy)
+                    }
                 }
                 Box {
                     IconButton(onClick = { headerMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "আরও", tint = Navy) }
                     DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
-                        DropdownMenuItem(text = { Text("আনফ্রেন্ড করুন") }, onClick = { headerMenu = false; confirmAction = "unfriend" })
-                        DropdownMenuItem(text = { Text("ব্লক করুন", color = Danger) }, onClick = { headerMenu = false; confirmAction = "block" })
+                        DropdownMenuItem(text = { Text("🔍 চ্যাটে খুঁজুন") }, onClick = { headerMenu = false; searchOn = true })
+                        DropdownMenuItem(text = { Text("🖼️ মিডিয়া ও ফাইল") }, onClick = { headerMenu = false; showGallery = true })
+                        DropdownMenuItem(
+                            text = { Text("⏳ অদৃশ্য মেসেজ (" + ((Session.disappear[uid] ?: 0).let { if (it == 0) "বন্ধ" else Session.disappearLabel(it) }) + ")") },
+                            onClick = { headerMenu = false; showDisappear = true }
+                        )
+                        if (isGroup) {
+                            DropdownMenuItem(text = { Text("👥 গ্রুপের তথ্য") }, onClick = { headerMenu = false; showGroupInfo = true })
+                        } else {
+                            DropdownMenuItem(text = { Text("আনফ্রেন্ড করুন") }, onClick = { headerMenu = false; confirmAction = "unfriend" })
+                            DropdownMenuItem(text = { Text("ব্লক করুন", color = Danger) }, onClick = { headerMenu = false; confirmAction = "block" })
+                        }
                     }
                 }
             }
+        }
+
+        if (searchOn) ChatSearchBar(searchQuery, { searchQuery = it }, shownMessages.size) { searchOn = false; searchQuery = "" }
+        val pinnedList = Session.messages.filter { it.pinned }.sortedBy { it.date }
+        if (pinnedList.isNotEmpty()) {
+            PinnedBanner(pinnedList) { id ->
+                val idx = shownMessages.indexOfFirst { it.id == id }
+                if (idx >= 0) uiScope.launch { listState.animateScrollToItem(idx) }
+            }
+        }
+        val disappearSecs = Session.disappear[uid] ?: 0
+        if (disappearSecs > 0) {
+            Text(
+                "⏳ অদৃশ্য মেসেজ চালু · নতুন মেসেজ ${Session.disappearLabel(disappearSecs)} পর মুছে যাবে",
+                fontSize = 12.sp, color = Muted,
+                modifier = Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 14.dp, vertical = 5.dp)
+            )
         }
 
         // Secure Me চালু থাকলে স্পষ্ট ব্যানার
@@ -272,7 +325,7 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(Session.messages, key = { it.id }) { m ->
+                items(shownMessages, key = { it.id }) { m ->
                     MessageRow(
                         m,
                         mine = m.from == Session.me?.uid,
@@ -330,6 +383,15 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
         // কম্পোজার
         Surface(color = composerColor, shadowElevation = 14.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                editTarget?.let { _ ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(14.dp)).background(Them).padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("✏️ মেসেজ এডিট করছেন", fontSize = 13.sp, color = Accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { editTarget = null; input = "" }) { Icon(Icons.Filled.Close, contentDescription = "এডিট বাতিল", tint = Muted) }
+                    }
+                }
                 replyTarget?.let { r ->
                     Row(
                         Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(14.dp))
@@ -355,7 +417,10 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                         Modifier.clip(RoundedCornerShape(50))
                             .background(if (secureMode) Color(0xFF17375F) else Canvas)
                             .border(1.dp, if (secureMode) Color(0xFF2B568C) else Line, RoundedCornerShape(50))
-                            .clickable { secureMode = !secureMode; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+                            .clickable {
+                                if (isGroup) Toast.makeText(ctx, "গ্রুপে Secure Me চলে না", Toast.LENGTH_SHORT).show()
+                                else { secureMode = !secureMode; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+                            }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -443,7 +508,11 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
                             .let { if (recording) it.background(Color(0xFFE54868)) else if (secureMode) it.background(Color(0xFF6FA8FF)) else it.background(BubbleBrush) }
                             .clickable {
                                 val text = input.trim()
-                                if (text.isNotEmpty()) Session.sendText(text, secureMode, ttlSeconds, replyTarget?.id) { ok -> if (ok) { input = ""; replyTarget = null } }
+                                if (text.isNotEmpty()) {
+                                    val et = editTarget
+                                    if (et != null) Session.editMessage(et.id, text) { ok -> if (ok) { input = ""; editTarget = null } }
+                                    else Session.sendText(text, secureMode, ttlSeconds, replyTarget?.id) { ok -> if (ok) { input = ""; replyTarget = null; Session.notifyTyping(uid, false) } }
+                                }
                                 else toggleRecord()
                             },
                         contentAlignment = Alignment.Center
@@ -464,6 +533,10 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             message = target,
             mine = target.from == Session.me?.uid,
             onDismiss = { selectedDelete = null },
+            onReact = { e -> selectedDelete = null; Session.react(target.id, e) },
+            onEdit = { selectedDelete = null; editTarget = target; input = target.text },
+            onPin = { selectedDelete = null; Session.pinMessage(target.id, !target.pinned) },
+            onForward = { selectedDelete = null; forwardTarget = target },
             onDeleteForMe = { selectedDelete = null; Session.deleteMessage(target, everyone = false) },
             onDeleteForEveryone = { selectedDelete = null; Session.deleteMessage(target, everyone = true) },
             onDownload = { url -> selectedDelete = null; downloadFile(ctx, url, target.fileName) },
@@ -498,6 +571,34 @@ fun ChatScreen(requestCallPermission: (kind: String, action: () -> Unit) -> Unit
             dismissButton = { TextButton(onClick = { confirmAction = null }) { Text("বাতিল") } }
         )
     }
+
+    forwardTarget?.let { t ->
+        ForwardDialog(
+            onPick = { dest -> forwardTarget = null; Session.forwardMessage(t.id, dest) { } },
+            onDismiss = { forwardTarget = null }
+        )
+    }
+    if (showGallery) {
+        MediaGalleryDialog(
+            onPick = { m ->
+                showGallery = false
+                if (m.isImage) { viewerUrl = Api.absoluteUrl(m.fileUrl.orEmpty()); viewerSecure = m.secure; viewerMsg = m }
+                else {
+                    val idx = Session.messages.indexOfFirst { it.id == m.id }
+                    if (idx >= 0) uiScope.launch { listState.animateScrollToItem(idx) }
+                }
+            },
+            onClose = { showGallery = false }
+        )
+    }
+    if (showDisappear) {
+        DisappearDialog(
+            chat = uid,
+            canChange = !isGroup || (Social.groupById(uid)?.admins?.contains(Session.me?.uid) == true),
+            onDismiss = { showDisappear = false }
+        )
+    }
+    if (showGroupInfo) GroupInfoDialog(uid) { showGroupInfo = false }
 
     if (showProfile) {
         ProfilePopup(
@@ -705,6 +806,7 @@ private fun MessageRow(
                 }
             }
         }
+        MessageMeta(m)
         Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(timeFormat.format(Date(m.date)), fontSize = 11.sp, color = Muted)
             if (mine) {
@@ -788,6 +890,10 @@ private fun MessageActionSheet(
     message: ChatMessage,
     mine: Boolean,
     onDismiss: () -> Unit,
+    onReact: (String) -> Unit,
+    onEdit: () -> Unit,
+    onPin: () -> Unit,
+    onForward: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForEveryone: () -> Unit,
     onOpenExternal: (String) -> Unit,
@@ -826,6 +932,7 @@ private fun MessageActionSheet(
                         modifier = Modifier.padding(horizontal = 12.dp)
                     )
                     Spacer(Modifier.height(4.dp))
+                    ExtraActionRows(message, mine, onReact, onEdit, onPin, onForward)
                     if (!message.isFile && message.text.isNotBlank()) {
                         SheetRow(Icons.Filled.ContentCopy, "কপি করুন", Ink) {
                             clipboard.setText(AnnotatedString(message.text))

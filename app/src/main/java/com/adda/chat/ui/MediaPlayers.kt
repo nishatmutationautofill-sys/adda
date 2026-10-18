@@ -123,6 +123,7 @@ fun VoiceMessagePlayer(url: String, mine: Boolean) {
     var playing by remember(url) { mutableStateOf(false) }
     var position by remember(url) { mutableStateOf(0L) }
     var duration by remember(url) { mutableStateOf(0L) }
+    var speed by remember(url) { mutableStateOf(1f) }
 
     LaunchedEffect(url) { duration = withContext(Dispatchers.IO) { readDuration(url) } }
     LaunchedEffect(playing, player) {
@@ -144,6 +145,7 @@ fun VoiceMessagePlayer(url: String, mine: Boolean) {
         val p = player ?: buildPlayer(ctx).also { np ->
             np.setMediaItem(MediaItem.fromUri(url))
             np.prepare()
+            np.setPlaybackSpeed(speed)
             np.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
                 override fun onPlaybackStateChanged(state: Int) {
@@ -192,6 +194,21 @@ fun VoiceMessagePlayer(url: String, mine: Boolean) {
             Text(
                 if (playing || position > 0) "${formatMs(position)} / ${formatMs(duration)}" else formatMs(duration),
                 fontSize = 11.sp, color = sub
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(
+            Modifier.clip(RoundedCornerShape(50))
+                .background(if (mine) Color.White.copy(alpha = 0.25f) else Them)
+                .clickable {
+                    speed = when (speed) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
+                    player?.setPlaybackSpeed(speed)
+                }
+                .padding(horizontal = 7.dp, vertical = 3.dp)
+        ) {
+            Text(
+                if (speed == 1f) "1x" else if (speed == 1.5f) "1.5x" else "2x",
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (mine) Color.White else Accent
             )
         }
     }

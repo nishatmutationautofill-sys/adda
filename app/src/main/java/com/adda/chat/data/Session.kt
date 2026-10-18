@@ -74,8 +74,11 @@ object Session {
     /** ব্লার থাকা আগের ছবি/ভিডিও যেগুলো ইউজার ট্যাপ করে লোড করেছে (শুধু এই চ্যাট খোলা থাকা পর্যন্ত) */
     val loadedMedia = mutableStateMapOf<String, Boolean>()
 
-    /** ৩ দিনের পুরনো ডাটা ডিভাইস থেকে মুছে যায় (সার্ভারেও একই নিয়ম) */
-    const val RETENTION_MS = 3L * 24 * 60 * 60 * 1000
+    /** ৭ দিনের পুরনো ডাটা ডিভাইস থেকে মুছে যায় (সার্ভারেও একই নিয়ম — ফাইল সার্ভারে ৭ দিনের বেশি থাকে না) */
+    const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
+
+    /** Secure Me ফাইল পুরোটা মেমরিতে এনক্রিপ্ট/ডিক্রিপ্ট হয়, তাই এর সীমা (সাধারণ ফাইলের কোনো সীমা নেই) */
+    const val SECURE_FILE_MAX_BYTES = 40L * 1024 * 1024
 
     @Volatile var appInForeground = false
 
@@ -98,16 +101,11 @@ object Session {
             val myUid = me?.uid ?: return@launch
             addMessage(ChatMessage(id, from, myUid, "text", text, null, null, 0L, date))
         } }
-        P2pChatManager.onFile = { from, id, path, name, size, date -> scope.launch {
-            val myUid = me?.uid ?: return@launch
-            val file = File(path)
-            addMessage(ChatMessage(id, from, myUid, "file", "", Uri.fromFile(file).toString(), name, size, date))
-        } }
         startServerUrlWatcher()
         startRetentionSweeper()
     }
 
-    // ---------- ৩ দিনের পুরনো ডাটা মোছা (ডিভাইস) ----------
+    // ---------- ৭ দিনের পুরনো ডাটা মোছা (ডিভাইস) ----------
 
     private fun startRetentionSweeper() {
         scope.launch {
@@ -128,7 +126,7 @@ object Session {
         messages.removeAll { it.date < cutoff }
         lastPreview.filterValues { it.date < cutoff }.keys.toList().forEach { lastPreview.remove(it) }
         withContext(Dispatchers.IO) {
-            // ডিক্রিপ্ট করা মিডিয়া, ভয়েস রেকর্ড ও ইমেজ ক্যাশের ৩ দিনের পুরনো ফাইল
+            // ডিক্রিপ্ট করা মিডিয়া, ভয়েস রেকর্ড ও ইমেজ ক্যাশের ৭ দিনের পুরনো ফাইল
             appContext.cacheDir.walkTopDown()
                 .filter { it.isFile && it.lastModified() < cutoff }
                 .filter { f ->
@@ -204,6 +202,7 @@ object Session {
         }
         ConnectionService.start(appContext)
         refreshPeople()
+        Social.refreshAll()
         connectSocket()
         refreshFcmToken()
     }
@@ -309,6 +308,10 @@ object Session {
         unread.clear()
         lastPreview.clear()
         loadedMedia.clear()
+        drafts.clear()
+        typing.clear()
+        disappear.clear()
+        Social.reset()
     }
 
     // ---------- বন্ধু ----------
@@ -348,7 +351,7 @@ object Session {
 
     /** চ্যাট খোলা ও অ্যাপ সামনে থাকলে সার্ভারকে জানায় যে বন্ধুর মেসেজ দেখা হয়েছে */
     fun markSeen(peer: String) {
-        if (!appInForeground || !socketConnected) return
+        if (!appInForeground || !socketConnected || isGroupId(peer)) return
         socket?.emit("chat:seen", JSONObject().put("uid", peer))
     }
 
@@ -489,12 +492,12 @@ object Session {
                 try {
                     Api.request("DELETE", "/api/messages/${Uri.encode(message.id)}?scope=${if (forEveryone) "everyone" else "me"}")
                 } catch (e: Api.ApiException) {
-                    // P2P-তে পাঠানো/পাওয়া ফাইল সার্ভারে থাকে না; লোকাল ডিলেট চালিয়ে যাবে
+                    // লোকাল ফাইল (ভয়েস/Secure কপি) সার্ভারে নাও থাকতে পারে; লোকাল ডিলেট চালিয়ে যাবে
                     if (!localOnly) throw e
                 }
                 messages.firstOrNull { it.id == message.id }?.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> withContext(Dispatchers.IO) { File(p).delete() } } }
                 messages.removeAll { it.id == message.id }
-                refreshPreviewFor(if (message.from == me?.uid) message.to else message.from)
+                refreshPreviewFor(peerOf(message, me?.uid))
                 toast(if (forEveryone) "উভয় দিক থেকে ডিলেট হয়েছে" else "আপনার দিক থেকে ডিলেট হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }
         }
@@ -503,7 +506,7 @@ object Session {
     /** ডিলেটের পর চ্যাট লিস্টের শেষ মেসেজ প্রিভিউ ঠিক করা */
     private fun refreshPreviewFor(peer: String) {
         val myUid = me?.uid ?: return
-        val last = messages.filter { (it.from == peer && it.to == myUid) || (it.from == myUid && it.to == peer) }.maxByOrNull { it.date }
+        val last = messages.filter { (isGroupId(peer) && it.to == peer) || (it.from == peer && it.to == myUid) || (it.from == myUid && it.to == peer) }.maxByOrNull { it.date }
         if (last == null) { lastPreview.remove(peer); return }
         lastPreview.remove(peer)
         recordPreview(peer, last, last.from == myUid)
@@ -528,11 +531,10 @@ object Session {
 
     fun openConversation(uid: String) {
         activeFriend = uid
-        if (socketConnected) {
-            P2pChatManager.connect(uid)
-            emit("p2p:ready", JSONObject().put("to", uid))
-        }
+        // টেক্সট, ছবি, ভিডিও ও ফাইল সবই এখন সার্ভারের মাধ্যমে যায়; P2P আর খোলা হয় না
         unread.remove(uid)
+        typing.remove(uid)
+        loadChatSettings(uid)
         messages.clear()
         seenIds.clear()
         loadedMedia.clear()
@@ -542,7 +544,7 @@ object Session {
                 if (activeFriend != uid) return@launch
                 for (i in 0 until arr.length()) {
                     val raw = parseMessage(arr.getJSONObject(i)).copy(history = true)
-                    if (System.currentTimeMillis() - raw.date >= RETENTION_MS) continue // ৩ দিনের পুরনো — দেখানো হবে না
+                    if (System.currentTimeMillis() - raw.date >= RETENTION_MS) continue // ৭ দিনের পুরনো — দেখানো হবে না
                     try { addMessage(hydrateMessage(raw)) } catch (e: Exception) {
                         toast("এনক্রিপ্টেড মেসেজ খোলা যায়নি: ${e.message}")
                     }
@@ -565,6 +567,23 @@ object Session {
 
     private suspend fun hydrateMessage(raw: ChatMessage): ChatMessage {
         val myUid = me?.uid ?: throw IllegalStateException("লগইন সেশন নেই")
+        if (raw.isFile && raw.encrypted && envelopeVersion(raw.envelope) == 2) {
+            // বড় ফাইল: ডিস্কে নামিয়ে টুকরো টুকরো করে ডিক্রিপ্ট (মেমরি ব্যবহার ফাইলের সাইজের ওপর নির্ভর করে না)
+            val envelope = raw.envelope ?: throw IllegalStateException("ফাইলের এনক্রিপশন তথ্য নেই")
+            val cipherFile = File(appContext.cacheDir, "dl_${raw.id}.enc")
+            val plainFile = File(appContext.cacheDir, "e2ee_${raw.id}.dec")
+            try {
+                Api.downloadToFile(raw.fileUrl ?: throw IllegalStateException("ফাইল URL নেই"), cipherFile)
+                val meta = withContext(Dispatchers.Default) { E2ee.decryptFileStreaming(cipherFile, plainFile, envelope, myUid) }
+                val safeName = meta.fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100).ifBlank { "adda_file" }
+                val local = File(appContext.cacheDir, "e2ee_${raw.id}_$safeName")
+                withContext(Dispatchers.IO) { local.delete(); plainFile.renameTo(local) }
+                return raw.copy(fileUrl = "file://${local.absolutePath}", fileName = meta.fileName, size = local.length(), encrypted = false)
+            } finally {
+                cipherFile.delete()
+                plainFile.delete()
+            }
+        }
         if (raw.isFile && raw.encrypted) {
             val envelope = raw.envelope ?: throw IllegalStateException("ফাইলের এনক্রিপশন তথ্য নেই")
             val cipherBytes = Api.downloadBytes(raw.fileUrl ?: throw IllegalStateException("ফাইল URL নেই"))
@@ -587,12 +606,23 @@ object Session {
         return raw
     }
 
+    private fun envelopeVersion(envelope: String?): Int =
+        try { JSONObject(envelope ?: "").optInt("_e2ee", 0) } catch (_: Exception) { 0 }
+
+    /** চ্যাট লিস্টে যে কী-তে এই মেসেজ দেখাবে: গ্রুপ হলে গ্রুপ আইডি, নইলে অপর পক্ষ */
+    private fun peerOf(m: ChatMessage, myUid: String?): String =
+        if (isGroupId(m.to)) m.to else if (m.from == myUid) m.to else m.from
+
     private fun addMessage(m: ChatMessage) {
         val myUid = me?.uid ?: return
         val active = activeFriend ?: return
         if (m.id.isEmpty() || seenIds.contains(m.id)) return
-        if (m.from != myUid && m.from != active) return
-        if (m.to != myUid && m.to != active) return
+        if (isGroupId(active)) {
+            if (m.to != active) return
+        } else {
+            if (m.from != myUid && m.from != active) return
+            if (m.to != myUid && m.to != active) return
+        }
         if (m.secure && m.expiresAt > 0 && m.expiresAt <= System.currentTimeMillis()) {
             m.fileUrl?.takeIf { it.startsWith("file:") }?.let { Uri.parse(it).path?.let { p -> File(p).delete() } }
             return
@@ -605,7 +635,7 @@ object Session {
         } else withServerExpiry
         seenIds.add(shown.id)
         messages.add(shown)
-        recordPreview(if (shown.from == myUid) shown.to else shown.from, shown, shown.from == myUid)
+        recordPreview(peerOf(shown, myUid), shown, shown.from == myUid)
         if (shown.secure && shown.expiresAt > 0) scheduleSecureExpiry(shown)
         if (shown.secure && shown.to == myUid && m.expiresAt == 0L) {
             socket?.emit("secure:opened", JSONObject().put("id", shown.id))
@@ -647,16 +677,18 @@ object Session {
             m.isFile -> "📎 ${m.fileName ?: "ফাইল"}"
             else -> m.text
         }
+        val peer = peerOf(m, myUid)
+        val title = if (isGroupId(m.to)) "${displayName(m.to)} · ${displayName(m.from)}" else displayName(m.from)
         if (active != null && (m.from == active || m.to == active)) {
             addMessage(m)
             if (m.from != myUid && !appInForeground) {
-                Notifier.message(appContext, displayName(m.from), preview, m.from.hashCode())
+                Notifier.message(appContext, title, preview, peer.hashCode())
             }
         } else if (m.from != myUid) {
-            unread[m.from] = (unread[m.from] ?: 0) + 1
-            lastPreview[m.from] = ChatPreview(preview, m.date, false)
-            if (appInForeground) toast("নতুন মেসেজ এসেছে: ${displayName(m.from)}")
-            else Notifier.message(appContext, displayName(m.from), preview, m.from.hashCode())
+            unread[peer] = (unread[peer] ?: 0) + 1
+            lastPreview[peer] = ChatPreview(preview, m.date, false)
+            if (appInForeground) toast("নতুন মেসেজ এসেছে: $title")
+            else Notifier.message(appContext, title, preview, peer.hashCode())
         }
     }
 
@@ -675,6 +707,7 @@ object Session {
 
     fun sendText(text: String, secure: Boolean = false, ttlSeconds: Int = 3, replyTo: String? = null, onDone: (success: Boolean) -> Unit) {
         val to = activeFriend ?: return
+        val secureEff = secure && !isGroupId(to) // গ্রুপে Secure Me চলে না (E2EE শুধু দুজনের মধ্যে)
         val s = socket
         if (s == null || !socketConnected) {
             toast("সার্ভারের সঙ্গে সংযোগ নেই")
@@ -683,23 +716,16 @@ object Session {
         }
         scope.launch {
             try {
-                val wireText = if (secure) {
+                val wireText = if (secureEff) {
                     // শুধু Secure Me চালু থাকলে এনক্রিপ্ট হবে
                     val peer = peerE2eePublicKey(to)
                     val payload = JSONObject().put("text", text).toString()
                     E2ee.encryptText(payload, me?.uid ?: throw IllegalStateException("লগইন নেই"), to, peer)
                 } else text
-                if (!secure && P2pChatManager.sendText(to, text)) {
-                    val sender = me?.uid ?: return@launch
-                    val now = System.currentTimeMillis()
-                    addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "text", text, null, null, 0L, now))
-                    onDone(true)
-                    return@launch
-                }
                 val data = JSONObject()
                     .put("to", to)
                     .put("text", wireText)
-                    .put("secure", secure)
+                    .put("secure", secureEff)
                     .put("ttlSeconds", ttlSeconds.coerceIn(1, 60))
                 if (replyTo != null) data.put("replyTo", JSONObject().put("id", replyTo))
                 s.emit("chat:send", data, Ack { args ->
@@ -716,14 +742,25 @@ object Session {
         }
     }
 
+    /**
+     * ফাইল/ছবি/ভিডিও সার্ভারের মাধ্যমে পাঠায় — রেজিউমেবল চাঙ্ক আপলোড (/api/uploads/*)।
+     * - সাধারণ: নেটওয়ার্ক কেটে গেলে যেখানে থেমেছিল সেখান থেকে চলে; ফাইলের সাইজের সীমা সার্ভারের (ডিফল্ট ১ GB)।
+     * - Secure Me: ফাইল ডিভাইসে টুকরো টুকরো করে AES-256-GCM-এ এনক্রিপ্ট হয়ে যায় (মেমরি-সীমা নেই);
+     *   প্রাপক খুললে নির্ধারিত সময় পর দুই ফোন ও সার্ভার থেকে মুছে যায়। গ্রুপে Secure Me চলে না।
+     * - সার্ভারে কোনো ফাইল ৭ দিনের বেশি থাকে না।
+     */
     fun sendFile(uri: Uri, secure: Boolean = false, ttlSeconds: Int = 3, replyTo: String? = null) {
         val to = activeFriend ?: run { toast("ফাইল পাঠাতে আগে একজন বন্ধুকে নির্বাচন করুন"); return }
+        val secureEff = secure && !isGroupId(to)
+        if (secure && !secureEff) toast("গ্রুপে Secure Me চলে না — সাধারণভাবে পাঠানো হচ্ছে")
         if (mediaUploadProgress != null) { toast("আগের ফাইলটি আপলোড হচ্ছে"); return }
         scope.launch {
-            var transcodedVideo: java.io.File? = null
+            var transcodedVideo: File? = null
+            val temps = ArrayList<File>()
             try {
                 mediaUploadProgress = 0f
                 mediaUploadLabel = "ফাইল প্রস্তুত হচ্ছে…"
+                val sender = me?.uid ?: throw IllegalStateException("লগইন নেই")
                 val pickedName = withContext(Dispatchers.IO) {
                     if (uri.scheme == "file") uri.lastPathSegment.orEmpty() else {
                         appContext.contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -742,7 +779,7 @@ object Session {
                         retriever.setDataSource(appContext, uri)
                         retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     } finally { retriever.release() }
-                    if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
+                    if (durationMs <= 0L) throw IllegalArgumentException("ভিডিওর দৈর্ঘ্য পড়া যায়নি")
                     mediaUploadLabel = "ভিডিও কমপ্রেস হচ্ছে…"
                     val converted = VideoTranscoder.transcode(appContext, uri, durationMs)
                     if (converted != null) {
@@ -754,41 +791,148 @@ object Session {
                 } else {
                     withContext(Dispatchers.IO) { FileUpload.prepare(appContext, uri) }
                 }
-                // P2P-only file sharing: no HTTP/server upload fallback. ফাইলের সাইজের কোনো সীমা নেই (ডিস্ক থেকে স্ট্রিম হয়)।
-                if (secure) {
-                    throw IllegalArgumentException("P2P-only মোডে Secure Me ফাইল পাঠানো বর্তমানে সমর্থিত নয়। Secure Me ফাইলের সার্ভার বিকল্প বন্ধ আছে।")
-                }
-                if (!P2pChatManager.isOpen(to)) {
-                    P2pChatManager.connect(to)
-                    throw IllegalStateException("P2P সংযোগ প্রস্তুত নয়। বন্ধুকে অনলাইনে রেখে সংযোগ তৈরি হওয়া পর্যন্ত অপেক্ষা করে আবার চেষ্টা করুন। কোনো সার্ভার আপলোড করা হয়নি।")
-                }
                 val mime = prepared.body.contentType()?.toString() ?: "application/octet-stream"
-                val local = File(appContext.cacheDir, "p2p_sent_${java.util.UUID.randomUUID()}_${prepared.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
-                mediaUploadLabel = "ফাইল প্রস্তুত হচ্ছে…"
-                withContext(Dispatchers.IO) { local.sink().buffer().use { prepared.body.writeTo(it) } }
-                mediaUploadLabel = "ফাইল পাঠানো হচ্ছে…"
-                mediaUploadProgress = 0f
-                val ok = P2pChatManager.sendFile(to, prepared.name, mime, local) { mediaUploadProgress = it }
-                if (!ok) {
-                    withContext(Dispatchers.IO) { local.delete() }
-                    throw IllegalStateException("P2P ফাইল ট্রান্সফার ব্যর্থ হয়েছে। বিকল্প সার্ভার আপলোড বন্ধ আছে; আবার চেষ্টা করুন।")
+                val ttl = ttlSeconds.coerceIn(1, 60)
+
+                // প্রস্তুত ফাইল ডিস্কে নামানো — চাঙ্ক ধরে পড়া ও আবার চেষ্টার জন্য
+                val plain = File(appContext.cacheDir, "up_${java.util.UUID.randomUUID()}.bin")
+                temps.add(plain)
+                withContext(Dispatchers.IO) {
+                    val sink = plain.sink().buffer()
+                    prepared.body.writeTo(sink)
+                    sink.flush()
+                    sink.close()
                 }
-                val sender = me?.uid ?: throw IllegalStateException("লগইন নেই")
-                addMessage(ChatMessage(java.util.UUID.randomUUID().toString(), sender, to, "file", "", Uri.fromFile(local).toString(), prepared.name, local.length(), System.currentTimeMillis()))
+
+                val sentJson: JSONObject
+                var localSecureCopy: File? = null
+                if (secureEff) {
+                    mediaUploadLabel = "এনক্রিপ্ট হচ্ছে…"
+                    val peerKey = peerE2eePublicKey(to)
+                    val encFile = File(appContext.cacheDir, "up_${java.util.UUID.randomUUID()}.enc")
+                    temps.add(encFile)
+                    val envelope = withContext(Dispatchers.Default) {
+                        E2ee.encryptFileStreaming(plain, encFile, sender, to, peerKey, prepared.name, mime)
+                    }
+                    mediaUploadLabel = "সিকিউর ফাইল পাঠানো হচ্ছে…"
+                    mediaUploadProgress = 0f
+                    sentJson = ResumableUpload.upload(
+                        encFile, to, "encrypted.bin", "application/octet-stream",
+                        secure = true, encrypted = true, envelope = envelope, ttlSeconds = ttl, replyTo = replyTo
+                    ) { mediaUploadProgress = it }
+                    // প্রেরকের নিজের দিকের ডিক্রিপ্ট করা কপি (সার্ভারের chat:expire এলে মুছে যাবে)
+                    val safeName = prepared.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100).ifBlank { "adda_file" }
+                    val copy = File(appContext.cacheDir, "e2ee_sent_${java.util.UUID.randomUUID()}_$safeName")
+                    withContext(Dispatchers.IO) { plain.copyTo(copy, overwrite = true) }
+                    localSecureCopy = copy
+                } else {
+                    mediaUploadLabel = "ফাইল পাঠানো হচ্ছে…"
+                    mediaUploadProgress = 0f
+                    sentJson = ResumableUpload.upload(
+                        plain, to, prepared.name, mime,
+                        secure = false, encrypted = false, envelope = null, ttlSeconds = ttl, replyTo = replyTo
+                    ) { mediaUploadProgress = it }
+                }
+                val sent = parseMessage(sentJson)
+                val secureCopy: File? = localSecureCopy
+                val shown = if (secureEff && secureCopy != null) {
+                    sent.copy(fileUrl = Uri.fromFile(secureCopy).toString(), fileName = prepared.name, size = secureCopy.length(), encrypted = false, envelope = null)
+                } else sent
+                addMessage(shown)
                 mediaUploadProgress = 1f
-                toast("ফাইল সরাসরি P2P-তে পাঠানো হয়েছে")
+                toast(if (secureEff) "সিকিউর ফাইল পাঠানো হয়েছে" else "ফাইল পাঠানো হয়েছে")
             } catch (e: Api.ApiException) { toast(e.message) }
             catch (e: IllegalArgumentException) { toast(e.message) }
-            catch (e: Exception) { toast("P2P ফাইল পাঠানো যায়নি: ${e.message}") }
+            catch (e: SecurityException) { toast(e.message) }
+            catch (e: Exception) { toast("ফাইল পাঠানো যায়নি: ${e.message}") }
             catch (e: OutOfMemoryError) { toast("মেমরি কম পড়েছে, ছোট ফাইল পাঠান") }
             catch (e: Throwable) { toast("ফাইল পাঠানো যায়নি: ${e.javaClass.simpleName}") }
             finally {
                 mediaUploadProgress = null
                 mediaUploadLabel = ""
-                // Remove only the generated compressed copy; the user's original video is untouched.
+                temps.forEach { it.delete() }
+                // শুধু কমপ্রেস করা কপি মোছা হয়; ব্যবহারকারীর আসল ভিডিও অক্ষত থাকে
                 transcodedVideo?.delete()
             }
         }
+    }
+
+    // ---------- রিঅ্যাকশন / এডিট / পিন / ফরওয়ার্ড / টাইপিং / ড্রাফট / অদৃশ্য মেসেজ ----------
+
+    /** চ্যাট আইডি → অসমাপ্ত লেখা (শুধু মেমরিতে; চ্যাট বদলালেও থাকে) */
+    val drafts = HashMap<String, String>()
+    /** চ্যাট আইডি → এখন যে টাইপ করছে তার নাম */
+    val typing = mutableStateMapOf<String, String>()
+    /** চ্যাট আইডি → অদৃশ্য মেসেজের সেকেন্ড (০ = বন্ধ) */
+    val disappear = mutableStateMapOf<String, Int>()
+    private var lastTypingSent = 0L
+    private val typingJobs = HashMap<String, kotlinx.coroutines.Job>()
+
+    fun notifyTyping(to: String, isTyping: Boolean = true) {
+        if (!socketConnected) return
+        val now = System.currentTimeMillis()
+        if (isTyping && now - lastTypingSent < 3000) return
+        lastTypingSent = if (isTyping) now else 0L
+        emit("chat:typing", JSONObject().put("to", to).put("typing", isTyping))
+    }
+
+    private fun ackError(args: Array<Any>): String = (args.firstOrNull() as? JSONObject)?.optString("error").orEmpty()
+
+    /** emoji খালি হলে রিঅ্যাকশন সরে যায় */
+    fun react(id: String, emoji: String) {
+        val s = socket ?: return
+        s.emit("chat:react", JSONObject().put("id", id).put("emoji", emoji), Ack { args ->
+            val err = ackError(args)
+            if (err.isNotEmpty()) scope.launch { toast(err) }
+        })
+    }
+
+    fun editMessage(id: String, text: String, onDone: (Boolean) -> Unit) {
+        val s = socket
+        if (s == null || !socketConnected) { toast("সার্ভারের সঙ্গে সংযোগ নেই"); onDone(false); return }
+        s.emit("chat:edit", JSONObject().put("id", id).put("text", text), Ack { args ->
+            val err = ackError(args)
+            scope.launch { if (err.isNotEmpty()) toast(err); onDone(err.isEmpty()) }
+        })
+    }
+
+    fun pinMessage(id: String, pinned: Boolean) {
+        val s = socket ?: return
+        s.emit("chat:pin", JSONObject().put("id", id).put("pinned", pinned), Ack { args ->
+            val err = ackError(args)
+            if (err.isNotEmpty()) scope.launch { toast(err) }
+        })
+    }
+
+    fun forwardMessage(id: String, to: String, onDone: (Boolean) -> Unit) {
+        scope.launch {
+            try {
+                Api.postObj("/api/messages/forward", JSONObject().put("id", id).put("to", to))
+                toast("ফরওয়ার্ড করা হয়েছে")
+                onDone(true)
+            } catch (e: Api.ApiException) { toast(e.message); onDone(false) }
+        }
+    }
+
+    fun loadChatSettings(chat: String) {
+        scope.launch {
+            try { disappear[chat] = Api.getObj("/api/chats/${Uri.encode(chat)}/settings").optInt("disappearSeconds", 0) }
+            catch (_: Exception) { }
+        }
+    }
+
+    fun setDisappear(chat: String, seconds: Int) {
+        scope.launch {
+            try {
+                Api.postObj("/api/chats/${Uri.encode(chat)}/settings", JSONObject().put("disappearSeconds", seconds))
+                disappear[chat] = seconds
+                toast(if (seconds == 0) "অদৃশ্য মেসেজ বন্ধ" else "এখন থেকে নতুন মেসেজ ${disappearLabel(seconds)} পর মুছে যাবে")
+            } catch (e: Api.ApiException) { toast(e.message) }
+        }
+    }
+
+    fun disappearLabel(seconds: Int): String = when (seconds) {
+        3600 -> "১ ঘণ্টা"; 86400 -> "১ দিন"; 604800 -> "৭ দিন"; else -> "বন্ধ"
     }
 
     // ---------- সকেট ----------
@@ -860,7 +1004,9 @@ object Session {
         s.on("chat:expire") { args ->
             val o = args.firstOrNull() as? JSONObject
             val id = o?.optString("id").orEmpty()
-            val expiresAt = o?.optLong("expiresAt", 0L) ?: 0L
+            val remainingMs = o?.optLong("remainingMs", 0L) ?: 0L
+            // সার্ভারের দেওয়া অবশিষ্ট সময় ধরে ফোনের ঘড়ির পার্থক্য এড়ানো হয়
+            val expiresAt = if (remainingMs > 0L) System.currentTimeMillis() + remainingMs else (o?.optLong("expiresAt", 0L) ?: 0L)
             scope.launch {
                 val index = messages.indexOfFirst { it.id == id }
                 if (expiresAt > 0L) {
@@ -872,6 +1018,68 @@ object Session {
                         pendingSecureExpiries[id] = expiresAt
                     }
                 }
+            }
+        }
+        s.on("chat:reactions") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            if (o != null) {
+                val id = o.optString("id"); val r = parseReactions(o.optJSONObject("reactions"))
+                scope.launch { val i = messages.indexOfFirst { it.id == id }; if (i >= 0) messages[i] = messages[i].copy(reactions = r) }
+            }
+        }
+        s.on("chat:edited") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            if (o != null) {
+                val id = o.optString("id"); val t = o.optString("text")
+                scope.launch { val i = messages.indexOfFirst { it.id == id }; if (i >= 0) messages[i] = messages[i].copy(text = t, editedAt = System.currentTimeMillis()) }
+            }
+        }
+        s.on("chat:pinned") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            if (o != null) {
+                val id = o.optString("id"); val p = o.optBoolean("pinned", false)
+                scope.launch { val i = messages.indexOfFirst { it.id == id }; if (i >= 0) messages[i] = messages[i].copy(pinned = p) }
+            }
+        }
+        s.on("chat:typing") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            if (o != null) {
+                val from = o.optString("from"); val chat = o.optString("to")
+                val key = if (isGroupId(chat)) chat else from
+                val isTyping = o.optBoolean("typing", false)
+                scope.launch {
+                    typingJobs.remove(key)?.cancel()
+                    if (isTyping) {
+                        typing[key] = displayName(from)
+                        typingJobs[key] = scope.launch { delay(5000); typing.remove(key) }
+                    } else typing.remove(key)
+                }
+            }
+        }
+        s.on("chat:settings") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            if (o != null) {
+                val chat = o.optString("chat"); val secs = o.optInt("disappearSeconds", 0)
+                scope.launch { disappear[chat] = secs }
+            }
+        }
+        s.on("group:update") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            val gid = o?.optString("id").orEmpty()
+            val action = o?.optString("action").orEmpty()
+            scope.launch {
+                if ((action == "left" || action == "removed") && o?.optString("uid") == me?.uid && activeFriend == gid) closeConversation()
+                Social.refreshGroups()
+            }
+        }
+        s.on("call:missed") { args ->
+            val o = args.firstOrNull() as? JSONObject
+            val from = o?.optString("from").orEmpty()
+            val video = o?.optString("kind") == "video"
+            scope.launch {
+                Social.refreshCalls()
+                if (appInForeground) toast("মিসড ${if (video) "ভিডিও" else "অডিও"} কল: ${displayName(from)}")
+                else Notifier.missedCall(appContext, displayName(from), video)
             }
         }
         s.on("friend:request") { args ->

@@ -99,6 +99,36 @@ object Api {
         }
     }
 
+    /** বড় ফাইল মেমরিতে না এনে সরাসরি ডিস্কে নামায় */
+    suspend fun downloadToFile(pathOrUrl: String, dest: java.io.File, onProgress: ((Float) -> Unit)? = null) = withContext(Dispatchers.IO) {
+        val url = if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) pathOrUrl else serverUrl + pathOrUrl
+        val builder = Request.Builder().url(url).withCommonHeaders().get()
+        try {
+            client.newCall(builder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) throw ApiException("ফাইল ডাউনলোড ব্যর্থ (${resp.code})", resp.code)
+                val body = resp.body ?: throw ApiException("ফাইল খালি", 0)
+                val total = body.contentLength()
+                var done = 0L
+                body.byteStream().use { input ->
+                    dest.outputStream().buffered().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (total > 0) onProgress?.invoke((done.toFloat() / total).coerceIn(0f, 1f))
+                        }
+                    }
+                }
+            }
+        } catch (e: ApiException) {
+            dest.delete(); throw e
+        } catch (e: IOException) {
+            dest.delete(); throw ApiException("ফাইল ডাউনলোড করা যায়নি", 0)
+        }
+    }
+
     suspend fun getObj(endpoint: String) = JSONObject(request("GET", endpoint))
     suspend fun getArr(endpoint: String) = JSONArray(request("GET", endpoint))
     suspend fun postObj(endpoint: String, json: JSONObject) = JSONObject(request("POST", endpoint, json = json))
